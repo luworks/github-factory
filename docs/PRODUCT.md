@@ -26,7 +26,7 @@ The game layer rewards comprehension. Buildings, paths, districts, connected wor
 
 ## Experience
 
-The landing page uses an editorial, warm mission-control aesthetic: a direct repository input, an original lunar world, and six curated projects. The explorer dedicates most space to the interactive world, with an accessible district index, a source inspector and tabs for real activity and the AI field guide. Five perspectives are immediately switchable. English is the competition default, Chinese remains available.
+The landing page uses an editorial, warm mission-control aesthetic: a direct repository input, an original lunar world, and twenty curated projects. The explorer dedicates most space to the interactive world, with an accessible district index, a source inspector and tabs for real activity and the AI field guide. Five perspectives are immediately switchable. English is the competition default, Chinese remains available.
 
 Statuses are bounded: a green workflow conclusion is green, an active workflow is active, skips and missing evidence are distinct. Architecture inference has a visible badge. A cached timestamp is visible, and collection failures preserve the last useful world with a clear signal problem.
 

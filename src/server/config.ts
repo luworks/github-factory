@@ -27,7 +27,7 @@ export function getConfig() {
     baseUrl:
       provider === "muse"
         ? env.MOONSHOT_META_API_BASE_URL || "https://api.meta.ai/v1"
-        : env.MOONSHOT_API_BASE_URL || "http://127.0.0.1:18317/v1",
+        : env.MOONSHOT_API_BASE_URL || "https://api.openai.com/v1",
     apiKey: provider === "muse" ? env.MOONSHOT_META_API_KEY || "" : env.MOONSHOT_API_KEY || "",
     githubToken: env.GITHUB_TOKEN || "",
     dataDir: resolve(env.MOONSHOT_DATA_DIR || ".data"),
