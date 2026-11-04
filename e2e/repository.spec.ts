@@ -5,6 +5,8 @@ test("SYNTHETIC repository form: empty guard, pending state, explicit failure, r
   let attempts = 0;
   api.respond("POST", "/api/worlds", async () => (++attempts === 1 ? pending.promise : { body: api.world }));
   await page.goto(`${basePath}/`);
+  await expect(page).toHaveTitle("Moon Factory — Your codebase, a living world");
+  await expect(page.getByRole("link", { name: "Moon Factory home", exact: true }).first()).toBeVisible();
   const input = page.getByRole("textbox", { name: "GitHub repository URL" });
   const generate = page.getByRole("button", { name: "Generate world", exact: true });
   await expect(generate).toBeDisabled();

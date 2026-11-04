@@ -7,10 +7,10 @@ export const Route = createRootRoute({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Moonshot — Your codebase, a living world" },
+      { title: "Moon Factory — Your codebase, a living world" },
       {
         name: "description",
-        content: "Turn any GitHub repository into a living, explorable world. Five perspectives. One source of truth.",
+        content: "Turn an open-source GitHub repository into a living, explorable world. Five perspectives. One source of truth.",
       },
     ],
     links: [

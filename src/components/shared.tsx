@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import type { Lang } from "../contracts";
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
-    <a className="brand" href={appPath("/")} aria-label="Moonshot home">
+    <a className="brand" href={appPath("/")} aria-label="Moon Factory home">
       <span className="brand-mark">
         <Orbit size={24} strokeWidth={1.5} />
       </span>
       <strong>
-        moonshot<span className="brand-dot">.</span>
+        moon factory<span className="brand-dot">.</span>
       </strong>
       {!compact && <span className="brand-tag">CODE INTO WORLDS</span>}
     </a>

@@ -8,7 +8,7 @@ test("SYNTHETIC five perspectives preserve selected node, source identity and no
   const inspector = page.locator(".inspector");
   const dock = page.getByRole("group", { name: "World perspective" });
   for (const [style, name] of [
-    ["moonshot", "Moonshot"],
+    ["moonshot", "Moon Factory"],
     ["factorio", "Factorio"],
     ["red-alert", "Red Alert"],
     ["red-alert-2", "Red Alert 2"],

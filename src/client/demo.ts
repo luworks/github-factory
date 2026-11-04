@@ -1,6 +1,6 @@
 import type { WorldSnapshot, NodeKind, StyleId } from "../contracts";
 export const STYLES: { id: StyleId; name: string; zh: string; subtitle: string; glyph: string }[] = [
-  { id: "moonshot", name: "Moonshot", zh: "月面基地", subtitle: "A new frontier", glyph: "◒" },
+  { id: "moonshot", name: "Moon Factory", zh: "月面工厂", subtitle: "A new frontier", glyph: "◒" },
   { id: "factorio", name: "Factorio", zh: "工业工厂", subtitle: "The system must grow", glyph: "⚙" },
   { id: "red-alert", name: "Red Alert", zh: "红警", subtitle: "Command the code", glyph: "⌖" },
   { id: "red-alert-2", name: "Red Alert 2", zh: "红警 2", subtitle: "Build your base", glyph: "✧" },
