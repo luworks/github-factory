@@ -20,32 +20,7 @@ import { WorldCanvas } from "../world/WorldCanvas";
 import { illustration, STYLES } from "../client/demo";
 import { createWorld, getGallery, shortNumber } from "../client/api";
 import { Brand, LanguageButton } from "./shared";
-function MiniTerrain({ index }: { index: number }) {
-  return (
-    <svg className={`mini-terrain terrain-${index % 5}`} viewBox="0 0 350 150" aria-hidden="true">
-      <defs>
-        <pattern id={`grid${index}`} width="27" height="18" patternUnits="userSpaceOnUse">
-          <path d="M0 18 27 0M0 0 27 18" fill="none" stroke="currentColor" strokeOpacity=".13" />
-        </pattern>
-      </defs>
-      <rect width="350" height="150" fill={`url(#grid${index})`} />
-      <path d="M-20 115 Q45 70 105 105T230 77T370 50" fill="none" stroke="currentColor" strokeOpacity=".35" strokeWidth="14" />
-      {Array.from({ length: 8 }, (_, i) => {
-        const x = 38 + (i % 4) * 76,
-          y = 45 + Math.floor(i / 4) * 51 + (i % 2) * 8,
-          h = 14 + ((i * 7 + index * 5) % 22);
-        return (
-          <g key={i}>
-            <path d={`M${x - 15} ${y}l20 -10 25 12 -20 12z`} fill="currentColor" opacity=".18" />
-            <path d={`M${x - 11} ${y}v-${h}l24 1v${h}z`} fill="currentColor" opacity=".52" />
-            <path d={`M${x - 11} ${y - h}l13 -7 24 1 -13 7z`} fill="currentColor" opacity=".85" />
-            <path d={`M${x + 13} ${y - h + 1}l13 -7v${h}l-13 7z`} fill="currentColor" opacity=".35" />
-          </g>
-        );
-      })}
-    </svg>
-  );
-}
+import { RepositoryPreview } from "./RepositoryPreview";
 export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lang) => void }) {
   const zh = lang === "zh",
     [repo, setRepo] = useState(""),
@@ -54,6 +29,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
     [gallery, setGallery] = useState<readonly FeaturedProject[]>(CURATED_PROJECTS),
     [style, setStyle] = useState<StyleId>("moonshot");
   const [ready, setReady] = useState(false);
+  const [galleryLoaded, setGalleryLoaded] = useState(false);
   useEffect(() => setReady(true), []);
   const sample = useMemo(illustration, []);
   useEffect(() => {
@@ -62,7 +38,8 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
       .then((x) => {
         if (active && x.projects.length) setGallery(x.projects);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => { if (active) setGalleryLoaded(true); });
     return () => {
       active = false;
     };
@@ -243,10 +220,11 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             </span>
           </div>
           <div className="project-grid">
-            {gallery.map((p, i) => (
-              <a className="project-card" href={appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`)} key={p.fullName}>
+            {gallery.map((p) => (
+              <div className="project-card-shell" key={p.fullName}>
+              <a className="project-card" href={appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`)} >
                 <div className="project-art">
-                  <MiniTerrain index={i} />
+                  <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} lang={lang} enabled={galleryLoaded} />
                   <span className="project-category">{p.category}</span>
                   <span className="project-arrow">
                     <ArrowUpRight size={18} />
@@ -268,12 +246,16 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
                       </span>
                     )}
                     <span className="project-ready">
-                      {p.ready ? (zh ? "已生成" : "World ready") : zh ? "打开勘测" : "Explore"}
+                      {zh ? "探索世界" : "Explore world"}
                       <ArrowRight size={12} />
                     </span>
                   </div>
                 </div>
               </a>
+              <a className="project-source-link" href={`https://github.com/${p.fullName}`} target="_blank" rel="noopener noreferrer" aria-label={`${zh ? "GitHub 来源" : "GitHub source"}: ${p.fullName}`}>
+                <Github size={11} /> {zh ? "来源" : "Source"}
+              </a>
+              </div>
             ))}
           </div>
         </section>

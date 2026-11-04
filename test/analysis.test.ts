@@ -422,7 +422,7 @@ describe("service freshness and concurrency", () => {
     });
     try {
       const featured = await service.listFeatured();
-      expect(featured).toHaveLength(20);
+      expect(featured).toHaveLength(19);
       expect(calls).toBe(0);
       expect(featured.find((project) => project.fullName === "react/react")).toMatchObject({
         ready: true,
@@ -444,7 +444,7 @@ describe("service freshness and concurrency", () => {
       store.close();
     }
   });
-  test("all twenty gallery cards use only persisted captures, including zero stars and unknown language", async () => {
+  test("all nineteen gallery cards use only persisted captures, including zero stars and unknown language", async () => {
     const store = new WorldStore(":memory:");
     const service = createWorldService({
       store,
@@ -482,7 +482,7 @@ describe("service freshness and concurrency", () => {
       });
       const featured = await service.listFeatured();
       expect(featured).toEqual(expected);
-      expect(featured).toHaveLength(20);
+      expect(featured).toHaveLength(19);
       expect(CURATED_PROJECTS.every((project) => project.stars === null && !project.ready && project.collectedAt === null)).toBe(true);
     } finally {
       store.close();

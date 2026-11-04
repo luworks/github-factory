@@ -41,13 +41,6 @@ export const CURATED_PROJECTS: ReadonlyArray<Readonly<FeaturedProject>> = Object
         suggestedStyle: "red-alert-2",
       },
       {
-        fullName: "meta-llama/llama-models",
-        name: "Llama",
-        description: "Explore the public Llama model repository.",
-        category: "Foundation models",
-        suggestedStyle: "civilization",
-      },
-      {
         fullName: "microsoft/vscode",
         name: "Visual Studio Code",
         description: "Explore the open-source code editor.",

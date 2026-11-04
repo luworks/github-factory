@@ -32,6 +32,7 @@ export const test = base.extend<{ api: FixtureApi; runtimeErrors: void }>({
       const handlers = new Map<string, ReplyHandler>();
       const respond = (method: string, path: string, handler: ReplyHandler) => handlers.set(`${method} ${path}`, handler);
       respond("GET", "/api/gallery", () => ({ body: { projects: syntheticGallery } }));
+      respond("GET", "/api/gallery-preview/synthetic-moonshot/browser-fixture", () => ({ body: { state: "unknown", reason: "cache-miss", fullName: world.repo.fullName, headSha: null, collectedAt: null, refreshAfter: null, github: "unknown", tree: "unavailable", nodes: [], edges: [], totalNodes: 0, totalEdges: 0, limited: false } }));
       respond("GET", "/api/budget", () => ({ body: syntheticBudget }));
       respond("GET", worldApi, () => ({ body: world }));
       // Creation/enrichment/refresh must be explicitly opted into by each test.
