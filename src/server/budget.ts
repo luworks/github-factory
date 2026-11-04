@@ -1,11 +1,13 @@
 import { Database } from "bun:sqlite";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { AiBlueprint, BudgetStatus } from "../contracts";
 import { getConfig } from "./config";
 
 export const HARD_LIMIT_USD = 50;
+export const PUBLIC_HOURLY_LIMIT_USD = 0.30;
+export const ACCOUNTING_CNY_PER_USD = 10;
 const SCALE = 1_000_000;
 export interface Prices {
   input: number;
@@ -23,6 +25,9 @@ export interface BudgetConfig {
   provider: string;
   model: string;
   apiKey: string;
+  ledgerPath?: string;
+  requireExistingLedger?: boolean;
+  hourlyBudgetUsd?: number;
 }
 export interface Usage {
   input: number;
@@ -37,7 +42,7 @@ export interface Reservation {
 export class BudgetError extends Error {
   constructor(
     public readonly code:
-      "budget_exhausted" | "generation_in_progress" | "invalid_reservation" | "cache_available" | "budget_accounting_unverified",
+      "budget_exhausted" | "hourly_budget_exhausted" | "generation_in_progress" | "invalid_reservation" | "cache_available" | "budget_accounting_unverified",
   ) {
     super(code);
   }
@@ -55,7 +60,22 @@ function validCount(n: number) {
 /** SQLite is the shared authority across processes and provider switches. Amounts are integer micro-USD. */
 export class BudgetLedger {
   private readonly db: Database;
-  constructor(private readonly config: BudgetConfig) {
+  constructor(private readonly config: BudgetConfig, private readonly now = Date.now) {
+    if (config.requireExistingLedger && !config.ledgerPath) throw new Error("Existing authoritative budget ledger required");
+    if (config.ledgerPath) {
+      if (!isAbsolute(config.ledgerPath) || !existsSync(config.ledgerPath)) throw new Error("Existing budget ledger unavailable");
+      this.db = new Database(config.ledgerPath, { create: false, strict: true });
+      const required = ["ai_calls", "ai_blueprints", "ai_budget_guard", "ai_one_active_key"];
+      const schema = this.db.query("SELECT name FROM sqlite_master WHERE type IN ('table','index')").all() as { name: string }[];
+      const wal = this.db.query("PRAGMA journal_mode").get() as { journal_mode: string };
+      if (required.some((name) => !schema.some((row) => row.name === name)) || wal.journal_mode.toLowerCase() !== "wal") {
+        this.db.close();
+        throw new Error("Existing budget ledger schema or WAL mode unavailable");
+      }
+      this.db.exec("PRAGMA busy_timeout=5000; PRAGMA synchronous=FULL;");
+      this.initializeHourlyAccounting();
+      return;
+    }
     mkdirSync(config.dataDir, { recursive: true, mode: 0o700 });
     this.db = new Database(join(config.dataDir, "ai-budget.sqlite"), { create: true, strict: true });
     this.db.exec("PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;");
@@ -74,6 +94,27 @@ export class BudgetLedger {
     CREATE TABLE IF NOT EXISTS ai_budget_guard (
       id INTEGER PRIMARY KEY CHECK(id=1), reason TEXT NOT NULL
     );`);
+    this.initializeHourlyAccounting();
+  }
+  private initializeHourlyAccounting() {
+    // Additive metadata in the SAME ledger, not a second spending authority.
+    // Incumbent callers remain schema-compatible and are not restarted.
+    this.db.exec(`CREATE TABLE IF NOT EXISTS ai_public_hourly (
+      call_id TEXT PRIMARY KEY, admitted_at TEXT NOT NULL, settled_at TEXT
+    )`);
+  }
+  private hourlyLimit(): number | undefined {
+    if (this.config.hourlyBudgetUsd === undefined) return undefined;
+    return Math.floor(Math.max(0, Math.min(PUBLIC_HOURLY_LIMIT_USD,
+      Number.isFinite(this.config.hourlyBudgetUsd) ? this.config.hourlyBudgetUsd : 0)) * SCALE);
+  }
+  private hourlyTotals() {
+    const since = new Date(this.now() - 3_600_000).toISOString();
+    return this.db.query(`SELECT
+      COALESCE(SUM(CASE WHEN c.state='settled' AND COALESCE(h.settled_at,c.created_at)>=? THEN c.charged_micros ELSE 0 END),0) spent,
+      COALESCE(SUM(CASE WHEN c.state='reserved' THEN c.reserved_micros ELSE 0 END),0) reserved,
+      COUNT(CASE WHEN c.state='reserved' OR COALESCE(h.settled_at,c.created_at)>=? THEN 1 END) calls
+      FROM ai_calls c LEFT JOIN ai_public_hourly h ON h.call_id=c.id`).get(since, since) as { spent: number; reserved: number; calls: number };
   }
   close() {
     this.db.close();
@@ -87,15 +128,25 @@ export class BudgetLedger {
       .get() as { spent: number; reserved: number; calls: number };
     const limit = ceiling(this.config);
     const guarded = Boolean(this.db.query("SELECT id FROM ai_budget_guard WHERE id=1").get());
+    const hourlyLimit = this.hourlyLimit(), hourly = hourlyLimit === undefined ? undefined : this.hourlyTotals();
+    const remaining = Math.max(0, limit - row.spent - row.reserved);
+    const hourlyRemaining = hourly && hourlyLimit !== undefined ? Math.max(0, hourlyLimit - hourly.spent - hourly.reserved) : undefined;
     return {
       limitUsd: limit / SCALE,
       spentUsd: row.spent / SCALE,
       reservedUsd: row.reserved / SCALE,
-      remainingUsd: guarded ? 0 : Math.max(0, limit - row.spent - row.reserved) / SCALE,
+      remainingUsd: guarded ? 0 : Math.min(remaining, hourlyRemaining ?? remaining) / SCALE,
       calls: row.calls,
       provider: this.config.provider,
       model: this.config.model,
       configured: Boolean(this.config.apiKey),
+      ...(hourly && hourlyLimit !== undefined ? { hourly: {
+        window: "rolling_60_minutes" as const, limitUsd: hourlyLimit / SCALE, spentUsd: hourly.spent / SCALE,
+        reservedUsd: hourly.reserved / SCALE, remainingUsd: guarded ? 0 : hourlyRemaining! / SCALE,
+        calls: hourly.calls, accountingCnyPerUsd: ACCOUNTING_CNY_PER_USD,
+        limitCny: hourlyLimit / SCALE * ACCOUNTING_CNY_PER_USD,
+        scope: "public_admission_shared_ledger_cost" as const,
+      } } : {}),
     };
   }
   reserve(cacheKey: string, usage: Usage, prices: Prices, reuseCached = false): Reservation {
@@ -125,13 +176,20 @@ export class BudgetLedger {
           .query(`SELECT COALESCE(SUM(charged_micros + CASE WHEN state='reserved' THEN reserved_micros ELSE 0 END),0) total FROM ai_calls`)
           .get() as { total: number };
         if (totals.total + amount > ceiling(this.config)) throw new BudgetError("budget_exhausted");
+        const hourlyLimit = this.hourlyLimit();
+        if (hourlyLimit !== undefined) {
+          const hourly = this.hourlyTotals();
+          if (hourly.spent + hourly.reserved + amount > hourlyLimit) throw new BudgetError("hourly_budget_exhausted");
+        }
         const id = randomUUID();
+        const createdAt = new Date(this.now()).toISOString();
         this.db
           .query(
             `INSERT INTO ai_calls(id,cache_key,provider,model,reserved_micros,state,input_bound,output_bound,created_at)
         VALUES(?,?,?,?,?,'reserved',?,?,?)`,
           )
-          .run(id, cacheKey, this.config.provider, this.config.model, amount, usage.input, usage.output, new Date().toISOString());
+          .run(id, cacheKey, this.config.provider, this.config.model, amount, usage.input, usage.output, createdAt);
+        if (hourlyLimit !== undefined) this.db.query("INSERT INTO ai_public_hourly(call_id,admitted_at) VALUES(?,?)").run(id, createdAt);
         return { id, reservedUsd: amount / SCALE, inputBound: usage.input, outputBound: usage.output };
       })
       .immediate();
@@ -175,6 +233,7 @@ export class BudgetLedger {
             outcome.slice(0, 80),
             reservation.id,
           );
+        this.db.query("UPDATE ai_public_hourly SET settled_at=? WHERE call_id=?").run(new Date(this.now()).toISOString(), reservation.id);
         if (cache) {
           const blueprint = { ...cache.blueprint, generator: { ...cache.blueprint.generator, costUsd: charged / SCALE } };
           this.db

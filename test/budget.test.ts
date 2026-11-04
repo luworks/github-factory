@@ -21,6 +21,50 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 describe("persistent hard budget", () => {
+  test("public hourly admission preserves the original cumulative ceiling and counts failures", () => {
+    const ledger = open(config({ hourlyBudgetUsd: 0.30 }));
+    const usage = { input: 40_000, output: 0 }; // offline US$0.10 bound
+    const one = ledger.reserve("hour-one", usage, prices);
+    ledger.settle(one, null, prices, "network_failure");
+    ledger.reserve("hour-two", usage, prices);
+    ledger.reserve("hour-three", usage, prices);
+    expect(() => ledger.reserve("hour-overflow", usage, prices)).toThrow("hourly_budget_exhausted");
+    expect(ledger.status()).toMatchObject({ limitUsd: 50, spentUsd: 0.1, reservedUsd: 0.2, remainingUsd: 0,
+      hourly: { limitUsd: 0.3, limitCny: 3, accountingCnyPerUsd: 10, spentUsd: 0.1, reservedUsd: 0.2, remainingUsd: 0, calls: 3 } });
+  });
+  test("old pending reservations and late settlements remain inside the rolling hourly bound", () => {
+    let now = 3_600_000;
+    const ledger = new BudgetLedger(config({ hourlyBudgetUsd: 0.2 }), () => now); ledgers.push(ledger);
+    const usage = { input: 40_000, output: 0 };
+    const old = ledger.reserve("old-pending", usage, prices);
+    now += 3_600_001;
+    ledger.reserve("new-pending", usage, prices);
+    expect(() => ledger.reserve("too-many", usage, prices)).toThrow("hourly_budget_exhausted");
+    ledger.settle(old, null, prices, "late_failure");
+    expect(ledger.status().hourly).toMatchObject({ spentUsd: 0.1, reservedUsd: 0.1, remainingUsd: 0 });
+    now += 3_600_001;
+    expect(ledger.status().hourly).toMatchObject({ spentUsd: 0, reservedUsd: 0.1, remainingUsd: 0.1 });
+  });
+  test("hourly public cap cannot be configured above US$0.30 and zero disables admission", () => {
+    const excessive = open(config({ hourlyBudgetUsd: 9 }));
+    expect(excessive.status().hourly?.limitUsd).toBe(0.3);
+    const disabled = open(config({ hourlyBudgetUsd: 0 }));
+    expect(() => disabled.reserve("no-paid", { input: 1, output: 1 }, prices)).toThrow("hourly_budget_exhausted");
+    expect(disabled.status().calls).toBe(0);
+  });
+  test("paid public operation requires an explicit existing authoritative ledger", () => {
+    expect(() => new BudgetLedger(config({ requireExistingLedger: true }))).toThrow("authoritative budget ledger required");
+    expect(() => new BudgetLedger(config({ requireExistingLedger: true, ledgerPath: "/tmp/never-created-factory-budget-ledger.sqlite" }))).toThrow("unavailable");
+  });
+  test("independent processes cannot exceed the rolling public hourly cap", async () => {
+    const c = config({ hourlyBudgetUsd: 0.3 }); open(c);
+    const script = `import {BudgetLedger} from ${JSON.stringify(new URL("../src/server/budget.ts", import.meta.url).pathname)};const ledger=new BudgetLedger(${JSON.stringify(c)});let ok=0;for(let n=0;n<10;n++){try{ledger.reserve(process.argv[1]+n,{input:40000,output:0},{input:2.5,output:10});ok++;}catch(e){if(e.code!=="hourly_budget_exhausted")throw e;}}ledger.close();console.log(ok);`;
+    const processes = Array.from({ length: 4 }, (_, i) => Bun.spawn([process.execPath, "--no-env-file", "-e", script, `hour-racer-${i}-`], { stdout: "pipe", stderr: "pipe" }));
+    const result = await Promise.all(processes.map(async (p) => ({ code: await p.exited, count: Number((await new Response(p.stdout).text()).trim()), error: await new Response(p.stderr).text() })));
+    expect(result.map((r) => ({ code: r.code, error: r.error }))).toEqual(result.map(() => ({ code: 0, error: "" })));
+    expect(result.reduce((sum, r) => sum + r.count, 0)).toBe(3);
+    expect(open(c).status()).toMatchObject({ limitUsd: 50, calls: 3, reservedUsd: 0.3, hourly: { reservedUsd: 0.3, remainingUsd: 0 } });
+  });
   test("known conservative prices; unknown and contributor variants rejected", () => {
     expect(modelPrices("openai", "gpt-6.1-sol")).toEqual(prices);
     for (const model of ["muse-spark-1.3", "muse-spark-1.2", "muse-spark-1.1"])

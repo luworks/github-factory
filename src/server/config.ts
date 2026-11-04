@@ -18,21 +18,31 @@ export function projectEnv(): Record<string, string> {
   return values;
 }
 
-export function getConfig() {
-  const env = projectEnv();
-  const provider = env.MOONSHOT_PROVIDER === "muse" ? "muse" : "openai";
+export function getConfig(env: Record<string, string> = projectEnv()) {
+  const publicRuntime = Boolean(env.MOONSHOT_PUBLIC_ORIGIN);
+  const budgetUsd = Math.max(0, Math.min(50, Number(env.MOONSHOT_BUDGET_USD || 0) || 0));
+  // Public analysis uses a fixed Meta deployment. Provider/model/endpoint are
+  // server configuration, never choices accepted from a repository request.
+  const provider = !publicRuntime && env.MOONSHOT_PROVIDER === "openai" ? "openai" : "muse";
   return {
     provider,
-    model: provider === "muse" ? env.MOONSHOT_META_MODEL || "muse-spark-1.3" : env.MOONSHOT_MODEL || "gpt-6.1-sol",
+    model: provider === "muse" ? publicRuntime ? "muse-spark-1.3" : env.MOONSHOT_META_MODEL || "muse-spark-1.3" : env.MOONSHOT_MODEL || "gpt-6.1-sol",
     baseUrl:
       provider === "muse"
-        ? env.MOONSHOT_META_API_BASE_URL || "https://api.meta.ai/v1"
+        ? publicRuntime ? "https://api.meta.ai/v1" : env.MOONSHOT_META_API_BASE_URL || "https://api.meta.ai/v1"
         : env.MOONSHOT_API_BASE_URL || "https://api.openai.com/v1",
     apiKey: provider === "muse" ? env.MOONSHOT_META_API_KEY || "" : env.MOONSHOT_API_KEY || "",
     githubToken: env.GITHUB_TOKEN || "",
     publicOrigin: env.MOONSHOT_PUBLIC_ORIGIN || "",
     githubRequestsPerHour: Math.max(0, Math.min(1000, Math.floor(Number(env.MOONSHOT_GITHUB_REQUESTS_PER_HOUR ?? 45) || 0))),
     dataDir: resolve(env.MOONSHOT_DATA_DIR || ".data"),
-    budgetUsd: Math.max(0, Math.min(50, Number(env.MOONSHOT_BUDGET_USD || 0) || 0)),
+    // An explicit existing file is required; BudgetLedger never initializes a
+    // new file at this path, so migration cannot silently fork paid history.
+    ledgerPath: env.MOONSHOT_BUDGET_LEDGER_PATH || undefined,
+    requireExistingLedger: publicRuntime && budgetUsd > 0,
+    // Conservative accounting ceiling, not a market exchange-rate claim:
+    // US$0.30 * 10 CNY/USD = CNY3. Operators may lower, never raise this guard.
+    hourlyBudgetUsd: publicRuntime ? Math.max(0, Math.min(0.30, Number(env.MOONSHOT_HOURLY_BUDGET_USD ?? 0.30) || 0)) : undefined,
+    budgetUsd,
   } as const;
 }

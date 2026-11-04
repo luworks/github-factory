@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import type { AiBlueprint, Mission, WorldSnapshot } from "../contracts";
 import { getConfig } from "./config";
 import { BudgetError, BudgetLedger, getBudgetStatus, modelPrices, type BudgetConfig, type Reservation, type Usage } from "./budget";
+import { requireOpenSourceLicense } from "./open-source";
 export { getBudgetStatus };
 
 export const PROMPT_VERSION = "repo-field-guide-v4";
@@ -368,6 +369,7 @@ export function createAiService(deps: AiDependencies) {
   const flights = new Map<string, Promise<WorldSnapshot>>();
   const ledgerFor = () => new BudgetLedger(config);
   function getCachedBlueprint(world: WorldSnapshot, options?: { allowPreviousHead?: boolean }): AiBlueprint | null {
+    requireOpenSourceLicense(world.repo.license);
     let ledger: BudgetLedger | undefined;
     try {
       ledger = ledgerFor();
@@ -412,6 +414,8 @@ export function createAiService(deps: AiDependencies) {
     }
   }
   async function generate(world: WorldSnapshot, force: boolean): Promise<WorldSnapshot> {
+    // Gate before cached interpretations, ledger access or any provider call.
+    requireOpenSourceLicense(world.repo.license);
     if (!force) {
       const cached = getCachedBlueprint(world);
       if (cached) return { ...world, blueprint: cached };

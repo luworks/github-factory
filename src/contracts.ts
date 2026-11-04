@@ -136,6 +136,17 @@ export interface ApiError {
   retryAfter?: number;
 }
 export interface BudgetStatus {
+  hourly?: {
+    window: "rolling_60_minutes";
+    limitUsd: number;
+    spentUsd: number;
+    reservedUsd: number;
+    remainingUsd: number;
+    calls: number;
+    accountingCnyPerUsd: number;
+    limitCny: number;
+    scope: "public_admission_shared_ledger_cost";
+  };
   limitUsd: number;
   spentUsd: number;
   reservedUsd: number;

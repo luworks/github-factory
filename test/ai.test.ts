@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BudgetLedger } from "../src/server/budget";
@@ -463,4 +463,15 @@ describe("evidence-bounded offline AI", () => {
     expect(service.getCachedBlueprint(world())).toBeNull();
     assertRules(await service.enrichWorld(world()), "budget_storage_unavailable");
   });
+});
+
+test("unknown licensing blocks both cached and paid AI before opening a ledger", async () => {
+  const c = config();
+  const unknown = world(); unknown.repo.license = null;
+  let requests = 0;
+  const ai = createAiService({ config: c, fetch: fake(async () => { requests++; throw new Error("must not fetch"); }) });
+  await expect(ai.enrichWorld(unknown)).rejects.toMatchObject({ code: "OPEN_SOURCE_REQUIRED", status: 403 });
+  expect(() => ai.getCachedBlueprint(unknown)).toThrow("open-source");
+  expect(requests).toBe(0);
+  expect(existsSync(join(c.dataDir, "ai-budget.sqlite"))).toBe(false);
 });
