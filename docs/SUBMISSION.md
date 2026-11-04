@@ -14,15 +14,15 @@ Prepared for manual review on 2026-11-04. This file is a draft, not a submission
 
 **License:** MIT. Dependencies, repository content, brands and media retain their own rights and notices.
 
-**Team name candidate:** Moon Factory. This is a proposed display name, not a verified legal entity or portal team identity.
+**Team name:** moon-factory (entrant selected). This display name is not a claim about legal-entity identity.
 
 ## Portal choices
 
 | Field | Prepared answer | Confirmation needed |
 | --- | --- | --- |
-| Team Name | Moon Factory | Entrant approves the display name |
+| Team Name | moon-factory | Entrant selected |
 | Team Members | Preserve the entrant's existing portal membership | Do not infer or add contributors from commit authors or AI agents |
-| Track | Indie Developer Track or Startups Track | Entrant must select the track for which they satisfy the actual rules; a company name alone does not establish eligibility |
+| Track | Indie Developer Track | Entrant selected; competition eligibility remains subject to the actual rules |
 | Problem statement | **Build for Your World** | Recommended: the product serves contributors, maintainers and people exploring open source |
 | Most Viral / X post link | Leave blank | No promotional post was created or authorized |
 | Public GitHub Repository | https://github.com/luworks/github-factory | Ready |

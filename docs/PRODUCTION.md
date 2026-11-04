@@ -2,6 +2,14 @@
 
 Public URL: **https://chaorders.com/github-factory/**. The bare path redirects to the trailing slash and preserves query parameters. The company site continues to serve its own homepage and `/api/health`.
 
+## Final Moon Factory release candidate
+
+The final public candidate is branded **Moon Factory**, with stable repository/URL. It includes nineteen editorial catalog entries: fifteen real historical cached worlds are admitted by the captured open-source license; four entries remain without an admitted preview. The custom-licensed Llama entry is removed. These maps retain their original heads, capture timestamps and stale expiry; none is claimed as a fresh collection. Gallery preview endpoints are cache-only and create no upstream or model calls.
+
+The user has authorized Meta activation using the existing server-only credential and the same physical original cumulative US$50 ledger. The new public runtime adds an atomic rolling-hour US$0.30 cap at a declared conservative10CNY/USD accounting ceiling, plus per-IP and deployment action limits described in [DEPLOYMENT.md](DEPLOYMENT.md). Source and model inputs are URL-only and limited to public repositories with recognized open-source licenses. Live paid acceptance is still a separate one-request check recorded with its real ledger delta; configuration alone is not model success.
+
+The earlier table below records the initial public cutover, not the final candidate's fresh-collection or paid-call count. Final integrated checks before rollout: TypeScript and build passed;211 unit tests and22 synthetic Chromium journeys passed, zero failures/skips. CI and installed source identity are read back separately for the final commit.
+
 ## Architecture and identity
 
 A dedicated Cloudflare path Worker forwards the product prefix to a dedicated HTTPS Tunnel, then to a persistent Bun 1.4.4 user service on loopback port 4177. SQLite stays on the Bun host across releases. The company's Worker, shared connector, incumbent Moonshot service on 4176 and historical paid ledger were not replaced or moved. No paid plan or model budget was enabled.
