@@ -2,7 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/api/health")({
   server: {
     handlers: {
-      GET: async () => {
+      GET: async ({ request }) => {
+        const { apiError } = await import("../server/http");
+        try {
+          const { clientIdentity, accessConfig } = await import("../server/access");
+          clientIdentity(request, accessConfig());
         const { getConfig } = await import("../server/config");
         const c = getConfig();
         const { readFile } = await import("node:fs/promises");
@@ -23,6 +27,7 @@ export const Route = createFileRoute("/api/health")({
           },
           { headers: { "cache-control": "no-store" } },
         );
+        } catch (error) { return apiError(error); }
       },
     },
   },
