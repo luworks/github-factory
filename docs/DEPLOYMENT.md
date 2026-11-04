@@ -45,7 +45,7 @@ Rollback the public cutover by removing only the recorded product route; the exi
 
 The repository uses `CLOUDFLARE_API_TOKEN` as an Actions Secret. Required permissions are target-account Workers Scripts Edit and Cloudflare Tunnel Edit, and `chaorders.com` Zone Read, DNS Edit and Workers Routes Edit. Never print it or put it in Variables, application `.env`, client bundles or build arguments.
 
-Non-secret repository Variables are `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`, `FACTORY_ORIGIN`, `MOONSHOT_BASE_PATH`, `MOONSHOT_PUBLIC_ORIGIN` and `MOONSHOT_BUDGET_USD` (zero). `FACTORY_ORIGIN` points to the dedicated HTTPS tunnel hostname. These Variables are configuration records: storing them does not itself deploy a Worker or change the persistent host environment. The current app host is deployed separately with `scripts/install-local.sh`; existing CI performs checks and synthetic tests only. No model credentials or connector token belong in the frontend build.
+Non-secret repository Variables are `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_ID`, `FACTORY_ORIGIN`, `MOONSHOT_BASE_PATH`, `MOONSHOT_PUBLIC_ORIGIN`, `MOONSHOT_GITHUB_REQUESTS_PER_HOUR` and `MOONSHOT_BUDGET_USD` (zero). `FACTORY_ORIGIN` points to the dedicated HTTPS tunnel hostname. These Variables are configuration records: storing them does not itself deploy a Worker or change the persistent host environment. The current app host is deployed separately with `scripts/install-local.sh`; existing CI performs checks and synthetic tests only. No model credentials or connector token belong in the frontend build.
 
 ## Public collection and model limits
 

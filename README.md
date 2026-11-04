@@ -27,7 +27,7 @@ bunx --no-install playwright install chromium
 bun run test:browser
 ```
 
-`MOONSHOT_BASE_PATH` is a build-time setting, default `/github-factory/`. To serve the root instead, use `MOONSHOT_BASE_PATH=/ bun run build`. Rebuild when changing it. The router, assets, browser navigation and API calls use the same prefix. [Deployment instructions](docs/DEPLOYMENT.md) cover persistent Bun hosting and the existing Cloudflare site.
+`MOONSHOT_BASE_PATH` is a build-time setting, default `/github-factory/`. To serve the root instead, use `MOONSHOT_BASE_PATH=/ bun run build`. Rebuild when changing it. The router, assets, browser navigation and API calls use the same prefix. [Production acceptance](docs/PRODUCTION.md) records the current public delivery. [Deployment instructions](docs/DEPLOYMENT.md) cover persistent Bun hosting and the existing Cloudflare site.
 
 ## Product and trust boundaries
 
