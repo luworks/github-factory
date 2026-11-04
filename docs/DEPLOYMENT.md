@@ -32,3 +32,17 @@ The company site uses Cloudflare Workers. Bun SQLite cannot run inside that exis
 - Existing company paths still work and the origin is reachable with the intended access boundary.
 
 Local checks are distinct from public DNS, gateway configuration, production rollout and live provider acceptance. No production-origin route or DNS change is performed by the setup scripts.
+
+## Independent Cloudflare path gateway
+
+`deploy/gateway.ts` is an independent Worker forwarding to `FACTORY_ORIGIN`, an HTTPS tunnel origin backed by the persistent Bun host. Build it with `bun build deploy/gateway.ts --target=browser --outfile=/tmp/github-factory-gateway.mjs`. Deploy it separately from the company-site Worker, with exactly two zone routes: `chaorders.com/github-factory` and `chaorders.com/github-factory/*`. Do not use `github-factory*`, which would also intercept unrelated company paths. The bare product path redirects to its trailing slash and retains the query string.
+
+Create a dedicated named tunnel and connector for this app; do not repurpose an existing shared connector. Its ingress must preserve `/github-factory/`, forward to loopback port 4177, and reject other paths. The app's server-only environment must set `MOONSHOT_PUBLIC_ORIGIN=https://chaorders.com`. The gateway retains that browser Origin, removes caller-supplied Host/forwarded headers, cookies and Authorization, and uses the tunnel's own HTTPS host upstream. Cross-origin POSTs are rejected at both layers. Never forward or expose the model keys through the Worker.
+
+Rollback the public cutover by removing only the two recorded product routes; the existing company-site Worker remains deployed. To roll back the Bun app, restore the previous `github-factory-web.service` unit and restart that service, retaining the same absolute data directory. Preserve all SQLite files and paid ledger history. Keep the prior release and gateway/tunnel identities in a private deployment record. A rollback of a failed first cutover restores the pre-existing product 404; it does not create a previous public product release.
+
+## Public collection and model limits
+
+`MOONSHOT_GITHUB_REQUESTS_PER_HOUR` defaults to **45 upstream HTTP attempts per UTC hour**, deployment-wide, persisted in `public-quota.sqlite` in the data directory. Retries count; cached reads do not. Admission is atomic across SQLite connections and survives service restarts. Zero disables collection. This is independent of the paid model ledger and does not imply that GitHub grants this many requests: unauthenticated limits can also be shared by other applications on the host. Upstream 403/429 and partial collection remain visible. At most two collections run concurrently; fresh data is cached for 90 seconds and forced refresh has a 15-second minimum interval. Public mutations also retain their shared eight-per-minute operation limit. An exhausted allowance leaves previous source evidence visible as stale; it is not reported as fresh success.
+
+Importing a repository, refreshing facts and changing styles do not request a new paid guide from the browser. AI generation has its own explicit action, disabled when the provider is unconfigured or no budget remains. Production must retain zero budget and empty model credentials until separately authorized; no historical paid ledger is moved, copied or reset by this cutover.

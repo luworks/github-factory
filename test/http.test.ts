@@ -27,3 +27,23 @@ test("redacts unexpected upstream error details", async () => {
   expect(r.status).toBe(503);
   expect(await r.text()).not.toContain("sensitive-upstream-detail");
 });
+test("trusted public origin overrides upstream host without trusting forwarded headers", () => {
+  const previous = process.env.MOONSHOT_PUBLIC_ORIGIN;
+  process.env.MOONSHOT_PUBLIC_ORIGIN = "https://chaorders.com";
+  const request = (origin: string) => new Request("http://origin.internal/api/worlds", {
+    method: "POST", headers: { origin, "content-type": "application/json", "x-forwarded-host": "evil.example" },
+  });
+  try {
+    expect(() => allowMutation(request("https://chaorders.com"), "proxy-test")).not.toThrow();
+    expect(() => allowMutation(request("https://evil.example"), "proxy-test")).toThrow("must start");
+    expect(() => allowMutation(request("http://origin.internal"), "proxy-test")).toThrow("must start");
+  } finally {
+    if (previous === undefined) delete process.env.MOONSHOT_PUBLIC_ORIGIN;
+    else process.env.MOONSHOT_PUBLIC_ORIGIN = previous;
+  }
+});
+test("rate limit responses retain retry guidance", async () => {
+  const response = apiError({ status: 429, code: "PUBLIC_RATE_LIMIT", message: "Cooldown", retryAfter: 7.2 });
+  expect(response.status).toBe(429);
+  expect(response.headers.get("retry-after")).toBe("8");
+});
