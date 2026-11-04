@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400">
+  <title>Moonshot original orbital lander</title>
+  <g fill="none" stroke="#b5c7a1" stroke-width="2">
+    <circle cx="200" cy="200" r="165" opacity=".35"/>
+    <circle cx="200" cy="200" r="145" opacity=".8"/>
+    <path d="M200 137 242 161 242 210 200 234 158 210 158 161Z" fill="#12232a"/>
+    <path d="m170 218-22 30h-14m96-30 22 30h14" stroke="#ed9864" stroke-width="3"/>
+  </g>
+  <circle cx="200" cy="185" r="10" fill="#ed9864"/>
+  <circle cx="331" cy="137" r="5" fill="#ed9864"/>
+</svg>

@@ -1,0 +1,23 @@
+The first step into a great open-source project can feel like landing on another planet. Folders everywhere. A history you don't share. Where do you begin?
+
+Meet Moonshot. Explore a public codebase as a world you can navigate. Architecture becomes a landscape. Curiosity becomes your starting point.
+
+Paste a public GitHub repository address, and begin a survey. Moonshot brings the project's structure and recent activity into one place to explore.
+
+Directories become districts. Manifest declarations reveal supported relationships. Select a district to inspect its path, its evidence, and its role. Then follow the link back to GitHub. The map is an invitation to read the source more deeply.
+
+A lunar colony. An industrial frontier. Two command bases. A civilization of connected districts. Five original visual styles, built around the same project. Change your perspective, and keep your bearings.
+
+A codebase is also a conversation: issues, pull requests, commits, and workflow runs. Explore the work alongside the architecture, with links to original records. Failed checks stay visible. Missing evidence stays unknown. You choose what deserves attention.
+
+Need a guide? Muse turns a bounded public repository survey into an explanation of its districts, with suggested missions linked to project evidence. Read the context. Check the source. Choose your next step.
+
+Trust starts with knowing the limits. AI explanations are interpretations. Capture times and coverage notes show what was surveyed. Animated connections illustrate the map, not runtime traffic. More lies beyond the survey.
+
+Travel from React to PyTorch. From developer tools to operating systems. Twenty public projects, each with its own terrain, its own questions, and its own source history. Open the world that makes you curious.
+
+Come back as the project changes. Refresh the GitHub snapshot. Review the latest captured work. Build your understanding one visit at a time.
+
+Understanding a project is the beginning of contributing to it. A clearer map can make that first step feel possible.
+
+Moonshot. Your codebase. A world of its own.

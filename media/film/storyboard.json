@@ -1,0 +1,114 @@
+{
+  "title": "Moonshot - Find Your Place",
+  "duration": 180,
+  "scenes": [
+    {
+      "id": "01-unknown-territory",
+      "start": 0,
+      "duration": 14,
+      "eyebrow": "EVERY CONTRIBUTION STARTS SOMEWHERE",
+      "title": "Where do you begin?",
+      "narration": "The first step into a great open-source project can feel like landing on another planet. Folders everywhere. A history you don't share. Where do you begin?",
+      "shot": "brand"
+    },
+    {
+      "id": "02-reveal",
+      "start": 14,
+      "duration": 12,
+      "eyebrow": "MEET MOONSHOT",
+      "title": "A world you can navigate.",
+      "narration": "Meet Moonshot. Explore a public codebase as a world you can navigate. Architecture becomes a landscape. Curiosity becomes your starting point.",
+      "shot": "architecture"
+    },
+    {
+      "id": "03-launch",
+      "start": 26,
+      "duration": 12,
+      "eyebrow": "FROM REPOSITORY TO WORLD",
+      "title": "Paste. Survey. Explore.",
+      "narration": "Paste a public GitHub repository address, and begin a survey. Moonshot brings the project's structure and recent activity into one place to explore.",
+      "shot": "landing"
+    },
+    {
+      "id": "04-grounded-architecture",
+      "start": 38,
+      "duration": 20,
+      "eyebrow": "FOLLOW THE SOURCE",
+      "title": "A map with evidence.",
+      "narration": "Directories become districts. Manifest declarations reveal supported relationships. Select a district to inspect its path, its evidence, and its role. Then follow the link back to GitHub. The map is an invitation to read the source more deeply.",
+      "shot": "architecture"
+    },
+    {
+      "id": "05-five-perspectives",
+      "start": 58,
+      "duration": 18,
+      "eyebrow": "FIVE PERSPECTIVES. ONE CODEBASE.",
+      "title": "Change your perspective.",
+      "narration": "A lunar colony. An industrial frontier. Two command bases. A civilization of connected districts. Five original visual styles, built around the same project. Change your perspective, and keep your bearings.",
+      "shot": "styles"
+    },
+    {
+      "id": "06-work-in-motion",
+      "start": 76,
+      "duration": 20,
+      "eyebrow": "FOLLOW THE WORK",
+      "title": "The project keeps moving.",
+      "narration": "A codebase is also a conversation: issues, pull requests, commits, and workflow runs. Explore the work alongside the architecture, with links to original records. Failed checks stay visible. Missing evidence stays unknown. You choose what deserves attention.",
+      "shot": "activity"
+    },
+    {
+      "id": "07-field-guide",
+      "start": 96,
+      "duration": 17,
+      "eyebrow": "A SOURCE-LINKED FIELD GUIDE",
+      "title": "Context for your next step.",
+      "narration": "Need a guide? Muse turns a bounded public repository survey into an explanation of its districts, with suggested missions linked to project evidence. Read the context. Check the source. Choose your next step.",
+      "shot": "guide"
+    },
+    {
+      "id": "08-honest-map",
+      "start": 113,
+      "duration": 18,
+      "eyebrow": "OBSERVED. INFERRED. UNKNOWN.",
+      "title": "Know what the map knows.",
+      "narration": "Trust starts with knowing the limits. AI explanations are interpretations. Capture times and coverage notes show what was surveyed. Animated connections illustrate the map, not runtime traffic. More lies beyond the survey.",
+      "shot": "guide"
+    },
+    {
+      "id": "09-atlas",
+      "start": 131,
+      "duration": 19,
+      "eyebrow": "AN OPEN-SOURCE ATLAS",
+      "title": "Twenty projects. New terrain.",
+      "narration": "Travel from React to PyTorch. From developer tools to operating systems. Twenty public projects, each with its own terrain, its own questions, and its own source history. Open the world that makes you curious.",
+      "shot": "atlas"
+    },
+    {
+      "id": "10-refresh",
+      "start": 150,
+      "duration": 13,
+      "eyebrow": "RETURN WITH CONTEXT",
+      "title": "Refresh your view.",
+      "narration": "Come back as the project changes. Refresh the GitHub snapshot. Review the latest captured work. Build your understanding one visit at a time.",
+      "shot": "activity"
+    },
+    {
+      "id": "11-value",
+      "start": 163,
+      "duration": 10,
+      "eyebrow": "FROM CURIOSITY TO CONTRIBUTION",
+      "title": "Find your place.",
+      "narration": "Understanding a project is the beginning of contributing to it. A clearer map can make that first step feel possible.",
+      "shot": "architecture"
+    },
+    {
+      "id": "12-brand",
+      "start": 173,
+      "duration": 7,
+      "eyebrow": "MOONSHOT",
+      "title": "Your codebase. A world of its own.",
+      "narration": "Moonshot. Your codebase. A world of its own.",
+      "shot": "brand"
+    }
+  ]
+}
