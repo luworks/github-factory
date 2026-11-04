@@ -1,8 +1,8 @@
-# GitHub Factory · Moonshot
+# Moon Factory · GitHub Factory
 
 **Your codebase, a living world.** Turn a public GitHub repository into an explorable architecture map, with source-linked work, CI activity and an optional AI field guide.
 
-Five original procedural perspectives share one world model: Moonshot, Factorio inspired, Red Alert inspired, Red Alert 2 inspired, and Civilization inspired. English and Chinese are supported. Twenty curated public repositories are listed; a fresh checkout collects their data on demand and does not ship their source or cached snapshots.
+Five original procedural perspectives share one world model: Moon Factory, Factorio inspired, Red Alert inspired, Red Alert 2 inspired, and Civilization inspired. English and Chinese are supported. Twenty curated public repositories are listed; a fresh checkout collects their data on demand and does not ship their source or cached snapshots.
 
 ## Development
 

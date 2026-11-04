@@ -1,8 +1,8 @@
-# Moonshot product definition
+# Moon Factory product definition
 
 ## Thesis
 
-Open source already has worlds: interfaces people enter, engines doing the work, packages connecting teams, infrastructure shipping changes. The repository file browser flattens these places into paths; dashboards split their progress into separate tools. Moonshot makes a navigable mental model of the whole project and keeps the work attached to its source.
+Open source already has worlds: interfaces people enter, engines doing the work, packages connecting teams, infrastructure shipping changes. The repository file browser flattens these places into paths; dashboards split their progress into separate tools. Moon Factory makes a navigable mental model of the whole project and keeps the work attached to its source.
 
 The winning demonstration is not a fictional factory that happens to have GitHub counters. It is the same unfamiliar, real repository becoming understandable in sixty seconds: paste a URL, discover the districts, inspect a source-backed connection, see a real change, and find an informed next contribution. Switching to a second, unrelated repo proves the system generalizes. Switching styles proves the world model is separate from its presentation.
 

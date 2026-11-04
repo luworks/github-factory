@@ -14,7 +14,7 @@ The first fully checked runtime/gateway code commit is `cc4c54204503b8ec103d616b
 | --- | --- |
 | Local TypeScript, Bun tests, production build | Passed; 181 unit tests, 0 failed, 0 skipped |
 | Production Chromium fixtures | 19 passed, 0 failed, 0 skipped; synthetic API interception, no paid calls |
-| Public landing, gallery, favicon, loaded JS/CSS, prefixed API | HTTP 200; catalog contains 20 entries |
+| Public landing, gallery, favicon, loaded JS/CSS, prefixed API | HTTP 200; initial catalog contained20 entries; final open-source-only catalog contains19 |
 | Real public import | `luworks/github-factory`, captured at `2026-11-04T22:44:02.180Z`, head `cc4c542...`; full path tree, 10 districts, 9 relationships, 4 workflow runs, rules guide |
 | Real forced refresh | Capture advanced to `2026-11-04T22:45:12.905Z`; GitHub health `ok`; no model request |
 | Exploration | Five styles rendered; selected district and pinned sources retained; English/Chinese, actual CI/commit activity, direct world reload and successful share-copy feedback exercised |
@@ -23,13 +23,13 @@ The first fully checked runtime/gateway code commit is `cc4c54204503b8ec103d616b
 | Host/Origin | Canonical Origin reached application validation through the gateway; cross-origin simple form was rejected with HTTP 403 |
 | Company routing | Homepage and company health remained HTTP 200; adjacent product-like paths retained the company's existing 404 response |
 
-Only one real repository was imported in this acceptance. Twenty catalog entries do not mean twenty fresh production collections. Workflow success is a bounded GitHub observation, not required-check completeness or downstream deployment proof.
+Only one real repository was imported in this acceptance. The final nineteen catalog entries do not mean nineteen fresh production collections. Workflow success is a bounded GitHub observation, not required-check completeness or downstream deployment proof.
 
 The initial exact Cloudflare routes missed a bare path with a query string. The prefix route and transparent `COMPANY_SITE` binding fix that case without changing company source. Initial insufficient DNS/route permissions were resolved before cutover. Browser clipboard readback was denied by browser permission; the real share action subsequently displayed successful copy feedback and the corresponding deep URL was usable.
 
 ## Limits and costs
 
-Models are disabled: no provider key, **US$0 model budget, US$0 new spend, zero calls and zero reservations**. Import, refresh and styles do not generate a new paid guide. The incumbent ledger remains the authority for its own cumulative spend; it was not copied or reset.
+The first public cutover kept models disabled with zero budget/calls. The final Moon Factory release configures Meta Muse Spark1.3 only under explicit user authorization, reusing the same original cumulative ledger (US$50 cap) and adding the independent rolling-hour reservation guard of at mostUS$0.30 under a conservative10CNY/USD accounting ceiling. Configuration alone is not proof of a valid Meta response; the final live acceptance records its actual ledger delta separately. Import, refresh and style changes do not generate a new paid guide. The incumbent ledger is never copied or reset.
 
 Production allows **60 GitHub upstream attempts per UTC hour**, persisted separately from the paid ledger. The checkout default is 45; retries count. Acceptance reached the limit and observed HTTP 429 with `Retry-After`, followed by explicit partial/stale cache presentation. No allowance was cleared to hide that result. GitHub's anonymous limit may also be shared by other host applications; admission is not a promise of upstream capacity. Two concurrent collections, a 90-second cache, 15-second forced-refresh minimum and eight mutations per minute per operation remain enforced.
 
