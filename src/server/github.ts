@@ -1,4 +1,5 @@
 import type { CommitEvent, RepoIdentity, WorkflowRun, WorkItem } from "../contracts";
+import { requireOpenSourceLicense } from "./open-source";
 
 export const GITHUB_LIMITS = {
   treePaths: 8_000,
@@ -314,6 +315,7 @@ export class GitHubClient {
     const metadata = await this.metadata(ref, deadline);
     if (!metadata || metadata.private !== false || (metadata.visibility && metadata.visibility !== "public"))
       throw new GitHubError("PUBLIC_ONLY", 403, "Only public repositories can be analyzed.");
+    requireOpenSourceLicense(metadata.license?.spdx_id);
     const canonical = parseRepo(text(metadata.full_name, 150));
     const root = `/repos/${canonical.owner}/${canonical.name}`;
     const branch = text(metadata.default_branch, 200);

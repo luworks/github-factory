@@ -1,4 +1,5 @@
 import { getConfig } from "./config";
+import { parseRepo } from "./github";
 
 export class HttpError extends Error {
   constructor(
@@ -71,4 +72,19 @@ export async function readJson(request: Request): Promise<Record<string, unknown
   } catch {
     throw new HttpError(400, "INVALID_JSON", "Please send a valid repository request.");
   }
+}
+
+export function repositoryRequest(body: Record<string, unknown>): string {
+  if (Object.keys(body).some((key) => !["repo", "enrich"].includes(key)) || (body.enrich !== undefined && typeof body.enrich !== "boolean"))
+    throw new HttpError(400, "REPOSITORY_INPUT_ONLY", "Only a GitHub repository URL and the explicit analysis choice are accepted.");
+  if (typeof body.repo !== "string" || !/^https:\/\/github\.com\//i.test(body.repo))
+    throw new HttpError(400, "REPO_URL_REQUIRED", "Paste a public open-source HTTPS GitHub repository URL.");
+  parseRepo(body.repo);
+  return body.repo;
+}
+
+export function actionRequest(body: Record<string, unknown>, action: "refresh" | "blueprint") {
+  if (Object.keys(body).some((key) => action !== "refresh" || key !== "refresh") ||
+      (action === "refresh" && body.refresh !== undefined && body.refresh !== true))
+    throw new HttpError(400, "REPOSITORY_INPUT_ONLY", "This endpoint accepts only its repository analysis action; prompts, code and model overrides are not accepted.");
 }

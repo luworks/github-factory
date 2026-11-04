@@ -31,7 +31,7 @@ function fixture(
     const custom = await options.intercept?.(url);
     if (custom) return custom;
     const path = url.pathname;
-    if (path === BASE) return json({ private: false, visibility: "public", full_name: "example/large", default_branch: "main" });
+    if (path === BASE) return json({ private: false, license: { spdx_id: "MIT" }, visibility: "public", full_name: "example/large", default_branch: "main" });
     if (path === `${BASE}/git/ref/heads/main`) return json({ object: { type: "commit", sha: HEAD } });
     if (path === `${BASE}/git/commits/${HEAD}`) return json({ sha: HEAD, tree: { sha: ROOT } });
     if (path.includes("/git/trees/")) {

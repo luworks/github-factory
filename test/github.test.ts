@@ -32,6 +32,7 @@ function fixture(
         overrides.metadata ?? {
           private: false,
           visibility: "public",
+          license: { spdx_id: "MIT" },
           full_name: "example/project",
           name: "project",
           default_branch: "main",
@@ -301,7 +302,7 @@ describe("moved public repositories", () => {
         if (url.pathname === "/repos/former/project")
           return response({}, 301, { location: "https://api.github.com/repositories/10270250" });
         if (url.pathname === "/repositories/10270250")
-          return response({ private: false, full_name: "example/project", default_branch: "main" });
+          return response({ private: false, license: { spdx_id: "MIT" }, full_name: "example/project", default_branch: "main" });
       },
     });
     const result = await client.collect(parseRepo("former/project"));

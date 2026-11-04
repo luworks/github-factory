@@ -3,13 +3,17 @@ export const Route = createFileRoute("/api/blueprint/$owner/$repo")({
   server: {
     handlers: {
       POST: async ({ params, request }) => {
-        const { json, apiError, allowMutation, readJson } = await import("../server/http");
+        const { json, apiError, allowMutation, readJson, actionRequest } = await import("../server/http");
         try {
+          const { accessRequest } = await import("../server/access");
+          const access = accessRequest(request);
           allowMutation(request, "blueprint");
-          await readJson(request);
+          actionRequest(await readJson(request), "blueprint");
           const { loadWorld } = await import("../server/service");
           const { enrichWorld } = await import("../server/ai");
-          return json(await enrichWorld(await loadWorld(`${params.owner}/${params.repo}`)));
+          const world = await loadWorld(`${params.owner}/${params.repo}`, { admit: access.admitCollection });
+          access.admitAi();
+          return json(await enrichWorld(world));
         } catch (e) {
           return apiError(e);
         }

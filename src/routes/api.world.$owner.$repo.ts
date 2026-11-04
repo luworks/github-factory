@@ -2,12 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 export const Route = createFileRoute("/api/world/$owner/$repo")({
   server: {
     handlers: {
-      GET: async ({ params }) => {
+      GET: async ({ params, request }) => {
         const { json, apiError } = await import("../server/http");
         try {
+          const { accessRequest } = await import("../server/access");
+          const access = accessRequest(request);
           const { loadWorld } = await import("../server/service");
           const { getCachedBlueprint } = await import("../server/ai");
-          const world = await loadWorld(`${params.owner}/${params.repo}`);
+          const world = await loadWorld(`${params.owner}/${params.repo}`, { admit: access.admitCollection });
           const blueprint = getCachedBlueprint(world, { allowPreviousHead: true });
           return json(blueprint ? { ...world, blueprint } : world);
         } catch (e) {
@@ -15,13 +17,15 @@ export const Route = createFileRoute("/api/world/$owner/$repo")({
         }
       },
       POST: async ({ params, request }) => {
-        const { json, apiError, allowMutation, readJson } = await import("../server/http");
+        const { json, apiError, allowMutation, readJson, actionRequest } = await import("../server/http");
         try {
+          const { accessRequest } = await import("../server/access");
+          const access = accessRequest(request);
           allowMutation(request, "refresh");
-          await readJson(request);
+          actionRequest(await readJson(request), "refresh");
           const { loadWorld } = await import("../server/service");
           const { getCachedBlueprint } = await import("../server/ai");
-          const world = await loadWorld(`${params.owner}/${params.repo}`, { refresh: true });
+          const world = await loadWorld(`${params.owner}/${params.repo}`, { refresh: true, admit: access.admitCollection });
           const blueprint = getCachedBlueprint(world, { allowPreviousHead: true });
           return json(blueprint ? { ...world, blueprint } : world);
         } catch (e) {
