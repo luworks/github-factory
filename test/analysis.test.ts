@@ -250,6 +250,28 @@ describe("real isolated SQLite cache", () => {
 });
 
 describe("service freshness and concurrency", () => {
+  test("expired cache navigation never waits for a hung collector and explicit refresh still collects", async () => {
+    const store = new WorldStore(":memory:");
+    const old = analyzeCollection(monorepo()); store.put(old, 90_000, NOW);
+    let calls = 0, admissions = 0;
+    let release!: (value: RepoCollection) => void;
+    const pending = new Promise<RepoCollection>((resolve) => { release = resolve; });
+    const service = createWorldService({ store, now: () => NOW + 90_001, collector: { collect: async () => { calls++; return pending; } } });
+    const admit = () => { admissions++; };
+    try {
+      const navigation = service.loadWorld("example/project", { admit });
+      expect(calls).toBe(0); expect(admissions).toBe(0);
+      const cached = await navigation;
+      expect(cached.headSha).toBe(old.headSha); expect(cached.collectedAt).toBe(old.collectedAt);
+      expect(cached.coverage.notes.join(" ")).toContain("STALE");
+      const refresh = service.loadWorld("example/project", { refresh: true, admit });
+      expect(calls).toBe(1); expect(admissions).toBe(1);
+      // A slow explicit refresh must not block another navigation to real cached facts.
+      expect((await service.loadWorld("example/project", { admit })).headSha).toBe(old.headSha);
+      const fresh = monorepo(); fresh.headSha = "b".repeat(40); fresh.collectedAt = new Date(NOW + 90_001).toISOString();
+      release(fresh); expect((await refresh).headSha).toBe(fresh.headSha);
+    } finally { release(monorepo()); store.close(); }
+  }, 1000);
   test("singleflight merges requests, fresh cache and forced cooldown avoid extra reads", async () => {
     const store = new WorldStore(":memory:");
     let calls = 0;
@@ -297,7 +319,7 @@ describe("service freshness and concurrency", () => {
       },
     });
     try {
-      const world = await service.loadWorld("example/project");
+      const world = await service.loadWorld("example/project", { refresh: true });
       expect(calls).toBe(1);
       expect(world.health.github).toBe("error");
       expect(world.headSha).toBe(SHA);
@@ -324,7 +346,7 @@ describe("service freshness and concurrency", () => {
       },
     });
     try {
-      await expect(service.loadWorld("example/project")).rejects.toMatchObject({ code: "PUBLIC_ONLY", status: 403 });
+      await expect(service.loadWorld("example/project", { refresh: true })).rejects.toMatchObject({ code: "PUBLIC_ONLY", status: 403 });
       expect(service.getCachedWorld("example/project")).toBeNull();
     } finally {
       store.close();
@@ -338,7 +360,7 @@ describe("service freshness and concurrency", () => {
     fresh.collectedAt = new Date(NOW + 90_001).toISOString();
     const service = createWorldService({ store, now: () => NOW + 90_001, collector: { collect: async () => fresh } });
     try {
-      const world = await service.loadWorld("example/project");
+      const world = await service.loadWorld("example/project", { refresh: true });
       expect(world.headSha).toBe(fresh.headSha);
       expect(world.refreshAfter).toBe(NOW + 180_001);
       expect(store.get("example/project", NOW + 90_002)?.fresh).toBe(true);

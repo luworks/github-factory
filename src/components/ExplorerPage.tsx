@@ -227,21 +227,13 @@ export function ExplorerPage({
               <span className="signal-dot" />
               {world.source === "demo"
                 ? "ILLUSTRATION"
-                : world.health.github === "error"
-                  ? zh
-                    ? "数据连接异常"
-                    : "UPLINK DEGRADED"
-                  : world.health.github === "partial"
-                    ? zh
-                      ? "部分快照"
-                      : "PARTIAL SNAPSHOT"
-                    : stale
-                      ? zh
-                        ? "缓存快照"
-                        : "CACHED SNAPSHOT"
-                      : zh
-                        ? "GITHUB 已连接"
-                        : "GITHUB CONNECTED"}
+                : stale
+                  ? zh ? "历史缓存 · 当前状态未知" : "STALE CACHE · CURRENT STATE UNKNOWN"
+                  : world.health.github === "error"
+                    ? zh ? "数据连接异常" : "UPLINK DEGRADED"
+                    : world.health.github === "partial"
+                      ? zh ? "部分快照" : "PARTIAL SNAPSHOT"
+                      : zh ? "GITHUB 已连接" : "GITHUB CONNECTED"}
               <span className="signal-time">{clock(world.collectedAt)}</span>
             </div>
             <div className="world-tabs">
@@ -705,12 +697,13 @@ export function ExplorerPage({
             </a>
             <span>
               <span className="signal-dot" />
-              {zh ? "每 60 秒检查更新" : "CHECKING FOR UPDATES EVERY 60s"}
+              {zh ? "AI 支持：Meta Muse Spark 1.3" : "Powered by Meta Muse Spark 1.3"}
             </span>
             <span>{zh ? "架构推断已标注 · 不代表运行时拓扑" : "ARCHITECTURE INFERENCE LABELED · NOT RUNTIME TELEMETRY"}</span>
           </footer>
         </>
       )}
+      {!world && <footer className="explorer-footer"><a href={appPath("/")}>{zh ? "返回首页" : "HOME"}</a><span>{zh ? "AI 支持：Meta Muse Spark 1.3" : "Powered by Meta Muse Spark 1.3"}</span></footer>}
     </div>
   );
 }

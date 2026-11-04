@@ -1,8 +1,20 @@
 import { basePath, test, expect } from "./fixtures";
 import { projectRepositoryPreview } from "../src/server/gallery-preview";
+import { syntheticGallery } from "../test/fixtures/browser-world";
 
 const previewApi = "/api/gallery-preview/synthetic-moonshot/browser-fixture";
 test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 600 }); });
+test("SYNTHETIC unknown gallery worlds cannot navigate to an empty route", async ({ page, api }) => {
+  api.respond("GET", "/api/gallery", () => ({ body: { projects: syntheticGallery.map((p) => ({ ...p, ready: false, collectedAt: null })) } }));
+  await page.goto(`${basePath}/`);
+  const card = page.locator(".project-card").filter({ has: page.getByRole("heading", { name: "SYNTHETIC Atlas", exact: true }) });
+  await expect(card).toHaveAttribute("aria-disabled", "true");
+  expect(await card.getAttribute("href")).toBeNull();
+  await expect(card).toContainText("Map unavailable");
+  await page.locator(".site-footer").scrollIntoViewIfNeeded();
+  await expect(page.getByText("Powered by Meta Muse Spark 1.3", { exact: true })).toBeVisible();
+  expect(api.requests.filter((r) => r.method === "POST")).toEqual([]);
+});
 test("SYNTHETIC gallery loads only cache preview on approach and keeps unknown explicit in both languages", async ({ page, api }) => {
   await page.setViewportSize({ width: 1440, height: 600 });
   await page.goto(`${basePath}/`);

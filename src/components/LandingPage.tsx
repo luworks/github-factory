@@ -144,7 +144,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             <div className="hero-examples">
               <span>{zh ? "试试" : "TRY"}</span>
               {["openclaw/openclaw", "react/react", "pingdotgg/t3code"].map((r) => (
-                <button key={r} onClick={() => setRepo(`https://github.com/${r}`)} disabled={!ready || busy}>
+                <button key={r} onClick={() => setRepo(`https://github.com/${r}`)} disabled={!ready || busy || !gallery.some((p) => p.fullName === r && p.ready)}>
                   {r.split("/")[1]}
                   <ChevronRight size={11} />
                 </button>
@@ -222,7 +222,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
           <div className="project-grid">
             {gallery.map((p) => (
               <div className="project-card-shell" key={p.fullName}>
-              <a className="project-card" href={appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`)} >
+              <a className="project-card" href={p.ready ? appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`) : undefined} aria-disabled={!p.ready} tabIndex={p.ready ? undefined : -1} onClick={(e) => { if (!p.ready) e.preventDefault(); }} >
                 <div className="project-art">
                   <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} lang={lang} enabled={galleryLoaded} />
                   <span className="project-category">{p.category}</span>
@@ -246,7 +246,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
                       </span>
                     )}
                     <span className="project-ready">
-                      {zh ? "探索世界" : "Explore world"}
+                      {p.ready ? (zh ? "探索世界" : "Explore world") : (zh ? "地图暂不可用" : "Map unavailable")}
                       <ArrowRight size={12} />
                     </span>
                   </div>
@@ -301,7 +301,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
         <span>{zh ? "为开源的好奇心而造。" : "BUILT FOR THE CURIOUS. BUILT ON OPEN SOURCE."}</span>
         <p>
           <ShieldCheck size={13} />
-          {zh ? "证据优先。推断明示。" : "Evidence first. Inference labeled."}
+          {zh ? "AI 支持：Meta Muse Spark 1.3" : "Powered by Meta Muse Spark 1.3"}
         </p>
       </footer>
     </div>

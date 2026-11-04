@@ -65,7 +65,9 @@ export function createWorldService(options: { collector: Collector; store: Snaps
       key = ref.fullName.toLowerCase();
     const cached = options.store.get(key, now());
     if (cached) requireOpenSourceLicense(cached.world.repo.license);
-    if (cached?.fresh && !settings?.refresh) return cached.world;
+    // Navigation is cache-first, including historical snapshots. It must never
+    // wait on GitHub, consume collection allowance, or start background work.
+    if (cached && !settings?.refresh) return getCachedWorld(input)!;
     if (inflight.has(key)) return inflight.get(key)!;
     // Forced refresh cannot turn one browser into an unbounded GitHub request loop.
     if (cached && settings?.refresh && now() - Date.parse(cached.world.collectedAt) < 15_000) return cached.world;

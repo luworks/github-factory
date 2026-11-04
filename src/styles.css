@@ -466,6 +466,8 @@ svg {
   transform: translateY(-4px);
   box-shadow: 0 12px 28px #26301d12;
 }
+.project-card[aria-disabled="true"] { cursor: default; }
+.project-card[aria-disabled="true"] .project-arrow { opacity: .25; }
 .project-art {
   height: 146px;
   position: relative;
