@@ -12,7 +12,7 @@ Requires **Bun 1.4.4**. All product development now lives in this independent MI
 bun --no-env-file install --frozen-lockfile --ignore-scripts
 cp .env.example .env
 bun run dev
-# http://127.0.0.1:4177/github-factory/
+# http://127.0.0.1:4178/github-factory/
 ```
 
 No model credentials or paid calls are required. The default model budget is zero; deterministic architecture analysis works without a model. For authenticated GitHub collection or optional AI, configure server-only values in `.env`. Never use `VITE_` variables for credentials. Enabling paid generation needs an explicit budget and a persistent ledger; switching providers must preserve that ledger.

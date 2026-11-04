@@ -8,7 +8,7 @@
     "#/*": "./src/*"
   },
   "scripts": {
-    "dev": "bun --no-env-file x --bun --no-install vite --host 127.0.0.1 --port 4177 --strictPort",
+    "dev": "bun --no-env-file x --bun --no-install vite --host 127.0.0.1 --port 4178 --strictPort",
     "build": "bun --no-env-file x --bun --no-install vite build",
     "start": "bun --no-env-file .output/server/index.mjs",
     "check": "bun --no-env-file x --bun --no-install tsc --noEmit",
