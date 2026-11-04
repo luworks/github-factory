@@ -13,7 +13,7 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
 }
 export const getGallery = () => request<{ projects: FeaturedProject[] }>("/api/gallery");
 export const createWorld = (repo: string) =>
-  request<WorldSnapshot>("/api/worlds", { method: "POST", body: JSON.stringify({ repo, enrich: true }) });
+  request<WorldSnapshot>("/api/worlds", { method: "POST", body: JSON.stringify({ repo, enrich: false }) });
 const pendingWorlds = new Map<string, Promise<WorldSnapshot>>();
 export function getWorld(owner: string, repo: string): Promise<WorldSnapshot> {
   const url = `/api/world/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;

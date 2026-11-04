@@ -20,8 +20,8 @@ test("SYNTHETIC repository form: empty guard, pending state, explicit failure, r
   await expect(page).toHaveURL(new RegExp(`${worldPath}\\?style=moonshot$`));
   await expect(page.getByRole("heading", { name: "browser-fixture" }).first()).toBeVisible();
   expect(api.requests.filter((r) => r.path === "/api/worlds")).toEqual([
-    { method: "POST", path: "/api/worlds", body: { repo: "https://github.com/synthetic-moonshot/browser-fixture", enrich: true } },
-    { method: "POST", path: "/api/worlds", body: { repo: "https://github.com/synthetic-moonshot/browser-fixture", enrich: true } },
+    { method: "POST", path: "/api/worlds", body: { repo: "https://github.com/synthetic-moonshot/browser-fixture", enrich: false } },
+    { method: "POST", path: "/api/worlds", body: { repo: "https://github.com/synthetic-moonshot/browser-fixture", enrich: false } },
   ]);
   await expect(page.getByRole("alert")).toHaveCount(0);
 });

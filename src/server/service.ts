@@ -4,6 +4,8 @@ import { analyzeCollection } from "./analysis";
 import { getConfig } from "./config";
 import { GitHubClient, GitHubError, parseRepo, type RepoCollection, type RepoRef } from "./github";
 import { WorldStore, worldStorePath } from "./store";
+import { PublicGitHubQuota } from "./public-quota";
+import { join } from "node:path";
 
 interface Collector {
   collect(ref: RepoRef): Promise<RepoCollection>;
@@ -125,7 +127,7 @@ function service() {
   if (!singleton) {
     const config = getConfig();
     singleton = createWorldService({
-      collector: new GitHubClient(config.githubToken),
+      collector: new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch)),
       store: new WorldStore(worldStorePath(config.dataDir)),
     });
   }

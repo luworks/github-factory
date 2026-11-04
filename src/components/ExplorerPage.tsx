@@ -472,11 +472,14 @@ export function ExplorerPage({
                         ? "确定性架构分析"
                         : "Evidence-based architecture analysis"
                       : `${world.blueprint.generator.model} · $${world.blueprint.generator.costUsd.toFixed(4)}`}
-                    <button onClick={() => void generate()} disabled={generating}>
+                    <button onClick={() => void generate()} disabled={generating || !budget?.configured || budget.remainingUsd <= 0}>
                       {generating ? <LoaderCircle className="spin" size={13} /> : <ArrowRight size={13} />}{" "}
                       {zh ? "生成 AI 探索手册" : "Generate AI field guide"}
                     </button>
                   </div>
+                  {budget && (!budget.configured || budget.remainingUsd <= 0) && (
+                    <p role="status">{zh ? "AI 导览未启用：未配置服务或可用预算为零。来源与确定性分析仍可使用。" : "AI guide disabled: provider is unconfigured or available budget is zero. Sources and deterministic analysis remain available."}</p>
+                  )}
                   <p className="repo-disclosure">
                     {zh
                       ? "AI 导览使用部分公开仓库路径、架构摘要和项目动态。生成时会将这些数据发送给配置的 AI 服务。"

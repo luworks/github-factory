@@ -30,6 +30,8 @@ export function getConfig() {
         : env.MOONSHOT_API_BASE_URL || "https://api.openai.com/v1",
     apiKey: provider === "muse" ? env.MOONSHOT_META_API_KEY || "" : env.MOONSHOT_API_KEY || "",
     githubToken: env.GITHUB_TOKEN || "",
+    publicOrigin: env.MOONSHOT_PUBLIC_ORIGIN || "",
+    githubRequestsPerHour: Math.max(0, Math.min(1000, Math.floor(Number(env.MOONSHOT_GITHUB_REQUESTS_PER_HOUR ?? 45) || 0))),
     dataDir: resolve(env.MOONSHOT_DATA_DIR || ".data"),
     budgetUsd: Math.max(0, Math.min(50, Number(env.MOONSHOT_BUDGET_USD || 0) || 0)),
   } as const;

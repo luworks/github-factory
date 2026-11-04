@@ -91,6 +91,7 @@ test("SYNTHETIC skipped CI is not counted as a pass", async ({ page, api }) => {
 });
 
 test("SYNTHETIC rules fallback notes and guide actions preserve evidence", async ({ page, api }) => {
+  api.respond("GET", "/api/budget", () => ({ body: { configured: true, remainingUsd: 1, limitUsd: 1, spentUsd: 0, reservedUsd: 0, calls: 0, provider: "synthetic", model: "synthetic" } }));
   api.respond("POST", "/api/blueprint/synthetic-moonshot/browser-fixture", () => ({ body: api.world }));
   await openWorld(page);
   await page.getByRole("button", { name: "Field guide", exact: true }).click();
@@ -106,6 +107,13 @@ test("SYNTHETIC rules fallback notes and guide actions preserve evidence", async
   await page.getByRole("button", { name: /SYNTHETIC web guide/ }).click();
   await expect(page.locator(".inspector").getByRole("heading", { name: "SYNTHETIC Web", exact: true })).toBeVisible();
   await expect(page.getByTestId("world-canvas")).toBeVisible();
+});
+
+test("SYNTHETIC unconfigured AI remains disabled with a visible explanation", async ({ page }) => {
+  await openWorld(page);
+  await page.getByRole("button", { name: "Field guide", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Generate AI field guide", exact: true })).toBeDisabled();
+  await expect(page.getByText("AI guide disabled:", { exact: false })).toBeVisible();
 });
 
 test("SYNTHETIC switching between activity and guide starts the new reading view at the top", async ({ page }) => {
