@@ -4,6 +4,7 @@ set -euo pipefail
 moonshot_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 moonshot_port="${MOONSHOT_PORT:-4177}"
 moonshot_bind="${MOONSHOT_BIND:-127.0.0.1}"
+moonshot_base="${MOONSHOT_BASE_PATH:-/github-factory/}"
 moonshot_bun="$(command -v bun)"
 moonshot_unit="$HOME/.config/systemd/user/github-factory-web.service"
 moonshot_release="$HOME/.local/share/github-factory/releases/$(date -u +%Y%m%dT%H%M%SZ)"
@@ -39,4 +40,4 @@ UNIT
 systemctl --user daemon-reload
 systemctl --user enable github-factory-web.service
 systemctl --user restart github-factory-web.service
-printf 'Moonshot release: %s\nURL: http://%s:%s\n' "$moonshot_release" "$moonshot_bind" "$moonshot_port"
+printf 'GitHub Factory release: %s\nURL: http://%s:%s%s\n' "$moonshot_release" "$moonshot_bind" "$moonshot_port" "$moonshot_base"
