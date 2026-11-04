@@ -53,3 +53,15 @@ test("gateway transport failure remains a recoverable error without upstream det
     expect(await response.text()).not.toContain("sensitive-origin-detail");
   } finally { mock.mockRestore(); }
 });
+
+test("adjacent company paths preserve the original request and response through the company binding", async () => {
+  const request = new Request("https://chaorders.com/github-factory-other?x=1", {
+    method: "POST", body: "synthetic company payload", headers: { cookie: "synthetic=company" },
+  });
+  let received: Request | undefined;
+  const original = new Response("synthetic existing company response", { status: 404, headers: { "x-company-fixture": "retained" } });
+  const result = await gateway.fetch(request, { ...env, COMPANY_SITE: { async fetch(input) { received = input; return original; } } });
+  expect(received).toBe(request);
+  expect(result).toBe(original);
+  expect(result.headers.get("x-company-fixture")).toBe("retained");
+});
