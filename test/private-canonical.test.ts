@@ -120,6 +120,15 @@ if (process.env.PRIVATE_CANONICAL_SYNTHETIC_CHILD !== "1") {
     finally { f.close(); }
   });
 
+  test("CHILD caller-shadowed producer helper properties cannot replace the actual fixed-endpoint metadata observation", async () => {
+    const f = fixture(), c = collector();
+    try {
+      for (const name of ["metadata", "request", "requestOnce"]) (c.client as any)[name] = async () => ({ value: metadata({ full_name: unrelated }), endpoint: `/repos/${unrelated}`, ...metadata({ full_name: unrelated }) });
+      await expect(createWorldService({ store: f.store, collector: c.client }).loadWorld(input, { explicitRevalidation: true })).rejects.toMatchObject({ code: "PUBLIC_ONLY" });
+      expect(c.calls).toHaveLength(2); expect(f.store.get(canonical)).toBeNull(); expect(f.store.get(unrelated)).not.toBeNull();
+    } finally { f.close(); }
+  });
+
   test("CHILD genuine unconsumed error replay on a different input or later invocation cannot authorize its old canonical target", async () => {
     for (const target of [input, "synthetic/other-input"]) {
       const f = fixture();

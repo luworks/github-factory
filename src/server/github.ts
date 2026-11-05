@@ -201,7 +201,9 @@ export class GitHubClient {
     private now: () => number = Date.now,
   ) {}
 
-  private async request(
+  // Keep the evidence-producing path runtime-private: caller-owned helper
+  // properties must never replace a requested endpoint or observe its context.
+  async #request(
     path: string,
     maxBytes: number = GITHUB_LIMITS.jsonBytes,
     deadline = Infinity,
@@ -212,14 +214,14 @@ export class GitHubClient {
     // server errors once, sharing the original collection deadline and fallback budget.
     for (let attempt = 0; ; attempt++) {
       try {
-        return await this.requestOnce(path, maxBytes, deadline, budget, metadata);
+        return await this.#requestOnce(path, maxBytes, deadline, budget, metadata);
       } catch (error) {
         if (attempt || !(error instanceof GitHubError) || !error.retryable) throw error;
       }
     }
   }
 
-  private async requestOnce(path: string, maxBytes: number, deadline: number, budget?: RequestBudget, metadata = false): Promise<any> {
+  async #requestOnce(path: string, maxBytes: number, deadline: number, budget?: RequestBudget, metadata = false): Promise<any> {
     const timeoutMs = Math.min(GITHUB_LIMITS.timeoutMs, deadline - this.now());
     if (timeoutMs <= 0) throw new GitHubError("GITHUB_TIMEOUT", 502, "GitHub collection exceeded its time limit.");
     if (this.blockedUntil > this.now())
@@ -335,7 +337,7 @@ export class GitHubClient {
     }
   }
 
-  private async metadata(ref: RepoRef, deadline: number): Promise<{ value: Json; endpoint: string }> {
+  async #metadata(ref: RepoRef, deadline: number): Promise<{ value: Json; endpoint: string }> {
     let path = `/repos/${ref.owner}/${ref.name}`;
     const seen = new Set<string>();
     const budget = { remaining: GITHUB_LIMITS.metadataRequests };
@@ -343,7 +345,7 @@ export class GitHubClient {
       if (seen.has(path)) throw new GitHubError("GITHUB_REDIRECT", 502, "GitHub repository redirect loop.");
       seen.add(path);
       try {
-        return { value: await this.request(path, 128 * 1024, deadline, budget, true), endpoint: path };
+        return { value: await this.#request(path, 128 * 1024, deadline, budget, true), endpoint: path };
       } catch (error) {
         if (!(error instanceof MetadataRedirect)) throw error;
         // Only repository metadata can redirect, and credentials never leave this exact origin.
@@ -368,13 +370,13 @@ export class GitHubClient {
       if (!state || state.invocation || state.input !== ref.fullName.toLowerCase()) throw new GitHubError("INVALID_COLLECTION_CONTEXT", 503, "Repository collection context is unavailable.");
       const invocation = {}; state.invocation = invocation; observation = { context, state, invocation };
     }
-    try { return await this.collectCurrent(ref, observation); }
+    try { return await this.#collectCurrent(ref, observation); }
     finally { if (observation) observation.state.settled = true; }
   }
-  private async collectCurrent(ref: RepoRef, observation?: { context: CollectionObservation; state: ObservationState; invocation: object }): Promise<RepoCollection> {
+  async #collectCurrent(ref: RepoRef, observation?: { context: CollectionObservation; state: ObservationState; invocation: object }): Promise<RepoCollection> {
     const deadline = this.now() + GITHUB_LIMITS.collectionMs;
-    const read = (path: string, maxBytes?: number) => this.request(path, maxBytes, deadline);
-    const observed = await this.metadata(ref, deadline), metadata = observed.value;
+    const read = (path: string, maxBytes?: number) => this.#request(path, maxBytes, deadline);
+    const observed = await this.#metadata(ref, deadline), metadata = observed.value;
     if (!isPublicRepositoryMetadata(metadata)) {
       const error = new GitHubError("PUBLIC_ONLY", 403, "Only public repositories can be analyzed."), canonical = privateCanonical(metadata, observed.endpoint);
       if (observation?.state.generation && canonical) privateRejections.set(error, { context: observation.context, invocation: observation.invocation, input: ref.fullName.toLowerCase(), canonical, consumed: false });
@@ -626,7 +628,7 @@ export class GitHubClient {
       const current = queue[index]!;
       let value: Json;
       try {
-        value = await this.request(`${root}/git/trees/${current.sha}`, GITHUB_LIMITS.fallbackBytes, deadline, budget);
+        value = await this.#request(`${root}/git/trees/${current.sha}`, GITHUB_LIMITS.fallbackBytes, deadline, budget);
         if (!value || value.sha !== current.sha || !Array.isArray(value.tree))
           throw new GitHubError("GITHUB_INVALID_RESPONSE", 502, "GitHub shallow tree did not match its requested SHA.");
       } catch (error) {
