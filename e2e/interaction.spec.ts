@@ -156,28 +156,21 @@ test("SYNTHETIC denied clipboard offers a share fallback without losing the worl
 });
 
 for (const width of [390, 768]) {
-  test(`SYNTHETIC English/Chinese landing and explorer fit a ${width}px viewport`, async ({ page }) => {
-    await page.setViewportSize({ width, height: 844 });
-    await page.goto(`${basePath}/`);
+  test(`SYNTHETIC English landing/explorer ignore legacy zh preference at ${width}px`, async ({ page }) => {
+    await page.addInitScript(() => localStorage.setItem("moonshot.lang", "zh"));
+    await page.setViewportSize({ width, height: 844 }); await page.goto(`${basePath}/`);
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("Every codebase.");
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-    await page.getByRole("button", { name: "Switch language" }).click();
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("每一份代码");
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-    await openWorld(page);
-    // The route restores the language preference selected on the landing page.
-    await expect(page.getByRole("button", { name: "动态", exact: true })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-    await page.getByRole("button", { name: "动态", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "这个世界，正在发生什么？", exact: true })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
-    await page.getByRole("button", { name: "Switch language" }).click();
-    await expect(page.getByRole("button", { name: "Activity", exact: true })).toBeVisible();
-    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+    await expect(page.getByRole("button", { name: "Switch language" })).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await openWorld(page); await expect(page.getByRole("button", { name: "Activity", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Every change leaves a mark.", exact: true })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
   });
 }
 
-test("SYNTHETIC mobile generate control keeps an accessible name when its visible text is hidden", async ({ page }) => {
+test("SYNTHETIC mobile generate and share controls keep accessible names", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(`${basePath}/`);
   await expect(page.locator(".repo-form button[type=submit]")).toHaveAccessibleName(/Generate world/i);

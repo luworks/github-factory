@@ -1,7 +1,6 @@
 /** Shared domain. No server configuration or credentials may enter this file. */
 export const STYLE_IDS = ["moonshot", "factorio", "red-alert", "red-alert-2", "civilization"] as const;
 export type StyleId = (typeof STYLE_IDS)[number];
-export type Lang = "en" | "zh";
 export type NodeKind = "app" | "service" | "package" | "data" | "infra" | "docs" | "test" | "tool" | "external";
 export type EvidenceLevel = "observed" | "inferred";
 export interface WorldNode {

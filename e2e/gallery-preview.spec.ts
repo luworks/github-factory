@@ -16,7 +16,7 @@ test("SYNTHETIC unknown gallery worlds cannot navigate to an empty route", async
   await expect(page.getByText("Powered by Meta Muse Spark 1.3", { exact: true })).toBeVisible();
   expect(api.requests.filter((r) => r.method === "POST")).toEqual([]);
 });
-test("SYNTHETIC gallery loads only cache preview on approach and keeps unknown explicit in both languages", async ({ page, api }) => {
+test("SYNTHETIC gallery loads only cache preview on approach and keeps unknown explicit in English", async ({ page, api }) => {
   await page.setViewportSize({ width: 1440, height: 600 });
   await page.goto(`${basePath}/`);
   const card = page.locator(".project-card").filter({ has: page.getByRole("heading", { name: "SYNTHETIC Atlas", exact: true }) });
@@ -25,9 +25,7 @@ test("SYNTHETIC gallery loads only cache preview on approach and keeps unknown e
   await card.scrollIntoViewIfNeeded();
   await expect(card).toContainText("Unknown · no cached map");
   await expect(card.locator("canvas")).toHaveCount(0);
-  await page.getByRole("button", { name: "Switch language" }).click();
-  await card.scrollIntoViewIfNeeded();
-  await expect(card).toContainText("未知 · 尚无缓存地图");
+  await expect(page.getByRole("button", { name: "Switch language" })).toHaveCount(0);
   expect(api.requests.filter((r) => r.method === "POST" || r.path.startsWith("/api/world/"))).toEqual([]);
 });
 
@@ -116,19 +114,14 @@ test("SYNTHETIC all five visible cached styles animate without interaction and f
   expect(api.requests.filter((r) => r.method === "POST" || r.path.startsWith("/api/world/"))).toEqual([]);
 });
 
-test("SYNTHETIC top-right GitHub repository link remains visible and usable in English and Chinese mobile layouts", async ({ page }) => {
+test("SYNTHETIC top-right GitHub repository link remains visible in English mobile layouts", async ({ page }) => {
   for (const width of [390, 768]) {
-    await page.setViewportSize({ width, height: 844 });
-    await page.goto(`${basePath}/`);
-    for (const language of ["English", "Chinese"]) {
-      const repository = page.locator(".site-header .header-repo-link");
-      await expect(repository).toBeVisible();
-      await expect(repository).toHaveText("GitHub");
-      await expect(repository).toHaveAttribute("href", "https://github.com/luworks/github-factory");
-      await expect(repository).toHaveAttribute("target", "_blank");
-      await expect(repository).toHaveAttribute("rel", "noopener noreferrer");
-      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${language} at ${width}px`).toBe(true);
-      await page.getByRole("button", { name: "Switch language" }).click();
-    }
+    await page.setViewportSize({ width, height: 844 }); await page.goto(`${basePath}/`);
+    const repository = page.locator(".site-header .header-repo-link");
+    await expect(repository).toBeVisible(); await expect(repository).toHaveText("GitHub");
+    await expect(repository).toHaveAttribute("href", "https://github.com/luworks/github-factory");
+    await expect(repository).toHaveAttribute("target", "_blank"); await expect(repository).toHaveAttribute("rel", "noopener noreferrer");
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1)).toBe(true);
+    await expect(page.getByRole("button", { name: "Switch language" })).toHaveCount(0);
   }
 });

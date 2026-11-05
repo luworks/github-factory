@@ -1,7 +1,5 @@
 import { appPath } from "../base-path";
 import { ArrowUpRight, Orbit } from "lucide-react";
-import { useEffect, useState } from "react";
-import type { Lang } from "../contracts";
 export function Brand({ compact = false }: { compact?: boolean }) {
   return (
     <a className="brand" href={appPath("/")} aria-label="Moon Factory home">
@@ -13,20 +11,6 @@ export function Brand({ compact = false }: { compact?: boolean }) {
       </strong>
       {!compact && <span className="brand-tag">CODE INTO WORLDS</span>}
     </a>
-  );
-}
-export function LanguageButton({ lang, onChange }: { lang: Lang; onChange: (lang: Lang) => void }) {
-  const [ready, setReady] = useState(false);
-  useEffect(() => setReady(true), []);
-  return (
-    <button
-      className="language-toggle"
-      disabled={!ready}
-      aria-label="Switch language"
-      onClick={() => onChange(lang === "en" ? "zh" : "en")}
-    >
-      {lang === "en" ? "EN / ZH" : "中文 / EN"}
-    </button>
   );
 }
 export function External({ href, children, className = "" }: { href: string; children: React.ReactNode; className?: string }) {

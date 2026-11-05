@@ -10,7 +10,7 @@ export const Route = createRootRoute({
       { title: "Moon Factory — Your codebase, a living world" },
       {
         name: "description",
-        content: "Turn an open-source GitHub repository into a living, explorable world. Five perspectives. One source of truth.",
+        content: "Turn a public GitHub repository into a living, explorable world. Five perspectives. One source of truth.",
       },
     ],
     links: [

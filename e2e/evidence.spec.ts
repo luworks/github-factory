@@ -127,3 +127,46 @@ test("SYNTHETIC switching between activity and guide starts the new reading view
   await expect(page.getByRole("heading", { name: "See the whole. Find your next move." })).toBeVisible();
   expect(await page.locator(".guide-view").evaluate((element) => element.scrollTop)).toBe(0);
 });
+
+
+test.describe("English UI with Chinese browser preference", () => {
+  test.use({ locale: "zh-CN" });
+  for (const preference of ["zh", "zh-CN"]) test(`SYNTHETIC legacy ${preference} stays English through navigation/reload/error/404 while original content survives`, async ({ page, api }) => {
+    api.world.repo.license = "NOASSERTION"; api.world.nodes[0].label = "原始 GitHub 模块";
+    api.world.issues[0].title = "原始 Issue 标题"; api.world.commits[0].message = "原始 commit 标题";
+    api.world.blueprint.summary = "SYNTHETIC 缓存导览原文";
+    await page.addInitScript((value) => localStorage.setItem("moonshot.lang", value), preference);
+    await page.goto(`${basePath}/`);
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Every codebase.");
+    await page.getByRole("link").filter({ has: page.getByRole("heading", { name: "SYNTHETIC Atlas", exact: true }) }).click();
+    await expect(page.getByRole("heading", { name: "browser-fixture" }).first()).toBeVisible();
+    await page.reload(); await expect(page.getByRole("button", { name: "Activity", exact: true })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    await expect(page.getByRole("button", { name: "Switch language" })).toHaveCount(0);
+    await expect(page.locator(".repository-license")).toContainText("NOASSERTION");
+    await expect(page.locator(".repository-license a")).toHaveAttribute("href", api.world.repo.url);
+    await page.locator(".district-row").filter({ hasText: "原始 GitHub 模块" }).click();
+    const inspector = page.locator(".inspector");
+    for (const name of ["Moon Factory", "Factorio", "Red Alert", "Red Alert 2", "Civilization"]) {
+      await page.getByRole("group", { name: "World perspective" }).getByRole("button", { name, exact: false }).filter({ hasText: new RegExp(`${name}$`) }).click();
+      await expect(inspector.getByRole("heading", { name: "原始 GitHub 模块", exact: true })).toBeVisible();
+      await expect(inspector.getByRole("link", { name: "Inspect on GitHub" })).toHaveAttribute("href", `${api.world.repo.url}/tree/${api.world.headSha}/apps/web`);
+    }
+    await page.getByRole("button", { name: "Activity", exact: true }).click();
+    await expect(page.getByRole("link", { name: /原始 Issue 标题/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: /原始 commit 标题/ })).toBeVisible();
+    await page.getByRole("button", { name: "Field guide", exact: true }).click();
+    await expect(page.locator(".guide-view")).toContainText("SYNTHETIC 缓存导览原文");
+    api.respond("GET", "/api/world/synthetic-moonshot/browser-fixture", () => ({ status: 503, body: { error: "SYNTHETIC source unavailable", code: "SERVICE_UNAVAILABLE" } }));
+    await page.reload(); await expect(page.getByRole("heading", { name: "We couldn’t map this territory." })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
+    api.respond("GET", "/api/world/synthetic-moonshot/browser-fixture", () => ({ body: api.world }));
+    await page.getByRole("button", { name: "Try again" }).click();
+    await expect(page.getByRole("heading", { name: "browser-fixture" }).first()).toBeVisible();
+    await page.goto(`${basePath}/not-a-known-route`);
+    await expect(page.getByRole("heading", { name: "Uncharted territory." })).toBeVisible();
+    await expect(page.locator("html")).toHaveAttribute("lang", "en");
+    expect(await page.evaluate(() => localStorage.getItem("moonshot.lang"))).toBe(preference);
+  });
+});

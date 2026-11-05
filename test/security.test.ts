@@ -103,3 +103,19 @@ test("a real public cached snapshot with unknown licensing remains usable withou
   try { expect((await service.loadWorld(world.repo.fullName)).repo.license).toBeNull(); expect((await service.getCachedWorld(world.repo.fullName))?.repo.license).toBeNull(); expect(calls).toBe(0); }
   finally { store.close(); }
 });
+
+test.each([null, "NOASSERTION", "LicenseRef-Custom"])("complete public GitHub collection preserves the actual license without fabricating it (%s)", async (license) => {
+  const sha = "a".repeat(40), tree = "b".repeat(40);
+  const client = new GitHubClient("", async (input) => {
+    const path = new URL(String(input)).pathname;
+    if (path === "/repos/example/project") return Response.json({ private: false, visibility: "public", full_name: "example/project", default_branch: "main", license: license === null ? null : { spdx_id: license } });
+    if (path.includes("/git/ref/heads/")) return Response.json({ object: { sha, type: "commit" } });
+    if (path.includes("/git/commits/")) return Response.json({ sha, tree: { sha: tree } });
+    if (path.includes("/git/trees/")) return Response.json({ sha: tree, truncated: false, tree: [] });
+    if (path.endsWith("/languages")) return Response.json({});
+    if (path.endsWith("/actions/runs")) return Response.json({ workflow_runs: [] });
+    return Response.json([]);
+  });
+  const collection = await client.collect(parseRepo("example/project"));
+  expect(collection.repo.license).toBe(license); expect(collection.headSha).toBe(sha); expect(collection.repo.fullName).toBe("example/project");
+});

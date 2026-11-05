@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { Lang, StyleId } from "../contracts";
+import type { StyleId } from "../contracts";
 import type { RepositoryPreviewData } from "../gallery/contracts";
 import { animatePreview } from "../gallery/animation";
 import { loadRepositoryPreview } from "../gallery/preview-loader";
@@ -133,14 +133,13 @@ function MiniWorldCanvas({ data, style }: { data: RepositoryPreviewData; style: 
   return <canvas ref={canvas} className="repository-preview-canvas" data-testid="repository-preview-canvas" aria-hidden="true" />;
 }
 
-export function RepositoryPreview({ fullName, style, lang, enabled = true }: { fullName: string; style: StyleId; lang: Lang; enabled?: boolean }) {
+export function RepositoryPreview({ fullName, style, enabled = true }: { fullName: string; style: StyleId; enabled?: boolean }) {
   const box = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [visible, setVisible] = useState(false);
   const [data, setData] = useState<RepositoryPreviewData | null>(null);
   const [failed, setFailed] = useState(false);
   const [now, setNow] = useState(Date.now);
-  const zh = lang === "zh";
   useEffect(() => {
     const el = box.current;
     if (!el) return;
@@ -167,21 +166,21 @@ export function RepositoryPreview({ fullName, style, lang, enabled = true }: { f
   }, [visible, data]);
   const mapped = !!data?.nodes.length;
   const state = data?.state === "cached" && data.refreshAfter !== null && data.refreshAfter <= now ? "stale" : data?.state;
-  const label = failed ? (zh ? "预览暂不可用" : "Preview unavailable")
-    : !data ? (near ? (zh ? "读取缓存中…" : "Loading cached map…") : (zh ? "等待预览" : "Preview pending"))
-    : state === "stale" ? (zh ? "历史缓存 · 当前状态未知" : "Stale cache · current state unknown")
-    : state === "cached" ? (zh ? "缓存快照" : "Cached snapshot")
-    : state === "unavailable" ? (zh ? "结构数据不可用" : "Structure unavailable")
-    : (zh ? "未知 · 尚无缓存地图" : "Unknown · no cached map");
+  const label = failed ? ("Preview unavailable")
+    : !data ? (near ? ("Loading cached map…") : ("Preview pending"))
+    : state === "stale" ? ("Stale cache · current state unknown")
+    : state === "cached" ? ("Cached snapshot")
+    : state === "unavailable" ? ("Structure unavailable")
+    : ("Unknown · no cached map");
   return (
     <div ref={box} className={`repository-preview preview-${style}`} data-preview-state={failed ? "unavailable" : state || "loading"}>
       {mapped && visible && <MiniWorldCanvas data={data!} style={style} />}
-      {!mapped && <div className="repository-preview-empty"><span>{label}</span><small>{zh ? "不自动采集或调用模型" : "No automatic collection or model calls"}</small></div>}
+      {!mapped && <div className="repository-preview-empty"><span>{label}</span><small>{"No automatic collection or model calls"}</small></div>}
       {mapped && <div className="repository-preview-caption">
-        <span>{label} · {data!.tree === "truncated" ? (zh ? "部分目录树" : "partial tree") : data!.github !== "ok" ? (zh ? "上游证据不完整" : "partial upstream evidence") : (zh ? "GitHub 事实" : "GitHub facts")}</span>
-        <span>{data!.nodes.length}/{data!.totalNodes} {zh ? "区域" : "districts"} · {data!.edges.length}/{data!.totalEdges} {zh ? "连线" : "links"} · {zh ? `${data!.nodes.filter((n) => n.confidence === "observed").length} 已观察 / ${data!.nodes.filter((n) => n.confidence === "inferred").length} 推断` : `${data!.nodes.filter((n) => n.confidence === "observed").length} observed / ${data!.nodes.filter((n) => n.confidence === "inferred").length} inferred`}</span>
-        <span>{data!.headSha?.slice(0, 7) || (zh ? "提交未知" : "head unknown")} · {data!.collectedAt ? <time dateTime={data!.collectedAt}>{new Date(data!.collectedAt).toISOString().replace("T", " ").slice(0, 16)} UTC</time> : (zh ? "采集时间未知" : "capture time unknown")}</span>
-        <span className="repository-preview-motion-note">{zh ? "连线动效为示意 · 非实时业务活动" : "Motion illustrates links · not live activity"}</span>
+        <span>{label} · {data!.tree === "truncated" ? ("partial tree") : data!.github !== "ok" ? ("partial upstream evidence") : ("GitHub facts")}</span>
+        <span>{data!.nodes.length}/{data!.totalNodes} {"districts"} · {data!.edges.length}/{data!.totalEdges} {"links"} · {`${data!.nodes.filter((n) => n.confidence === "observed").length} observed / ${data!.nodes.filter((n) => n.confidence === "inferred").length} inferred`}</span>
+        <span>{data!.headSha?.slice(0, 7) || ("head unknown")} · {data!.collectedAt ? <time dateTime={data!.collectedAt}>{new Date(data!.collectedAt).toISOString().replace("T", " ").slice(0, 16)} UTC</time> : ("capture time unknown")}</span>
+        <span className="repository-preview-motion-note">{"Motion illustrates links · not live activity"}</span>
       </div>}
     </div>
   );

@@ -32,42 +32,37 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import type { BudgetStatus, Lang, StyleId, WorldNode, WorldSnapshot } from "../contracts";
+import type { BudgetStatus, StyleId, WorldNode, WorldSnapshot } from "../contracts";
 import { WorldCanvas } from "../world/WorldCanvas";
 import { STYLES } from "../client/demo";
 import { clock, enrichWorld, getBudget, getWorld, refreshWorld, shortNumber } from "../client/api";
-import { Brand, External, LanguageButton } from "./shared";
+import { Brand, External } from "./shared";
 function sourceUrl(world: WorldSnapshot, path: string) {
   return `${world.repo.url}/tree/${encodeURIComponent(world.headSha)}/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
-function ciSummary(w: WorldSnapshot, zh: boolean) {
-  if (!w.workflows.length) return { label: zh ? "CI 状态未知" : "No CI evidence", tone: "neutral" };
+function ciSummary(w: WorldSnapshot) {
+  if (!w.workflows.length) return { label: "No CI evidence", tone: "neutral" };
   const failed = w.workflows.filter((r) => ["failure", "timed_out", "action_required"].includes(r.conclusion ?? ""));
   if (failed.length)
     return {
-      label: zh ? `${failed.length} 个检查需关注` : `${failed.length} check${failed.length > 1 ? "s" : ""} need attention`,
+      label: `${failed.length} check${failed.length > 1 ? "s" : ""} need attention`,
       tone: "attention",
     };
-  if (w.workflows.some((r) => r.status !== "completed")) return { label: zh ? "CI 运行中" : "CI in progress", tone: "active" };
+  if (w.workflows.some((r) => r.status !== "completed")) return { label: "CI in progress", tone: "active" };
   const passed = w.workflows.filter((r) => r.conclusion === "success").length;
   return {
-    label: zh ? `${passed} 个通过 · ${w.workflows.length - passed} 个其它` : `${passed} passed · ${w.workflows.length - passed} other`,
+    label: `${passed} passed · ${w.workflows.length - passed} other`,
     tone: passed === w.workflows.length ? "healthy" : "neutral",
   };
 }
 export function ExplorerPage({
   owner,
   repo,
-  lang,
-  onLangChange,
 }: {
   owner: string;
   repo: string;
-  lang: Lang;
-  onLangChange: (l: Lang) => void;
 }) {
-  const zh = lang === "zh",
-    [world, setWorld] = useState<WorldSnapshot | null>(null),
+  const [world, setWorld] = useState<WorldSnapshot | null>(null),
     [error, setError] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false),
     [generating, setGenerating] = useState(false),
@@ -146,7 +141,7 @@ export function ExplorerPage({
     [world, query],
   );
   const selected = world?.nodes.find((n) => n.id === selectedId),
-    ci = world ? ciSummary(world, zh) : null,
+    ci = world ? ciSummary(world) : null,
     stale = world ? Date.now() > world.refreshAfter : false;
   const share = async () => {
     try {
@@ -154,7 +149,7 @@ export function ExplorerPage({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
-      setError(zh ? "复制网址即可分享这个世界。" : "Copy the browser URL to share this world.");
+      setError("Copy the browser URL to share this world.");
     }
   };
   const styleInfo = STYLES.find((s) => s.id === style)!;
@@ -173,10 +168,9 @@ export function ExplorerPage({
         </a>
         <div className="explorer-top-actions">
           <span className="public-tag">PUBLIC REPOSITORY</span>
-          <LanguageButton lang={lang} onChange={onLangChange} />
-          <button className="share-button" onClick={share}>
+          <button className="share-button" onClick={share} aria-label={copied ? "World link copied" : "Share world"}>
             {copied ? <Check size={14} /> : <Copy size={14} />}
-            <span>{copied ? (zh ? "已复制" : "Copied") : zh ? "分享世界" : "Share world"}</span>
+            <span>{copied ? ("Copied") : "Share world"}</span>
           </button>
         </div>
       </header>
@@ -185,7 +179,7 @@ export function ExplorerPage({
           {error ? (
             <>
               <TriangleAlert size={36} />
-              <h1>{zh ? "暂时无法勘测这片区域" : "We couldn’t map this territory."}</h1>
+              <h1>{"We couldn’t map this territory."}</h1>
               <p role="alert">{error}</p>
               <div>
                 <button
@@ -195,10 +189,10 @@ export function ExplorerPage({
                     void load();
                   }}
                 >
-                  {zh ? "重试" : "Try again"}
+                  {"Try again"}
                   <RefreshCw size={14} />
                 </button>
-                <a href={appPath("/")}>{zh ? "返回首页" : "Back to Mission Control"}</a>
+                <a href={appPath("/")}>{"Back to Mission Control"}</a>
               </div>
             </>
           ) : (
@@ -207,12 +201,12 @@ export function ExplorerPage({
                 <OrbitIcon />
               </span>
               <div className="eyebrow">ESTABLISHING UPLINK</div>
-              <h1>{zh ? "正在勘测你的世界" : "Surveying your world."}</h1>
+              <h1>{"Surveying your world."}</h1>
               <p>
                 {owner} / <strong>{repo}</strong>
               </p>
               <small>
-                {zh ? "读取公开源文件、依赖与 GitHub 进展。" : "Reading public source paths, dependencies and GitHub activity."}
+                {"Reading public source paths, dependencies and GitHub activity."}
               </small>
               <div className="loading-track">
                 <span />
@@ -228,23 +222,23 @@ export function ExplorerPage({
               {world.source === "demo"
                 ? "ILLUSTRATION"
                 : stale
-                  ? zh ? "历史缓存 · 当前状态未知" : "STALE CACHE · CURRENT STATE UNKNOWN"
+                  ? "STALE CACHE · CURRENT STATE UNKNOWN"
                   : world.health.github === "error"
-                    ? zh ? "数据连接异常" : "UPLINK DEGRADED"
+                    ? "UPLINK DEGRADED"
                     : world.health.github === "partial"
-                      ? zh ? "部分快照" : "PARTIAL SNAPSHOT"
-                      : zh ? "GITHUB 已连接" : "GITHUB CONNECTED"}
+                      ? "PARTIAL SNAPSHOT"
+                      : "GITHUB CONNECTED"}
               <span className="signal-time">{clock(world.collectedAt)}</span>
             </div>
             <div className="world-tabs">
               {[
-                { id: "world", icon: Map, en: "World", zh: "世界" },
-                { id: "activity", icon: Activity, en: "Activity", zh: "动态" },
-                { id: "guide", icon: BookOpen, en: "Field guide", zh: "探索手册" },
+                { id: "world", icon: Map, en: "World" },
+                { id: "activity", icon: Activity, en: "Activity" },
+                { id: "guide", icon: BookOpen, en: "Field guide" },
               ].map((t) => (
                 <button key={t.id} className={tab === t.id ? "active" : ""} onClick={() => setTab(t.id as typeof tab)}>
                   <t.icon size={14} />
-                  {zh ? t.zh : t.en}
+                  {t.en}
                 </button>
               ))}
             </div>
@@ -269,14 +263,14 @@ export function ExplorerPage({
           <div className="explorer-grid">
             <aside className="district-sidebar">
               <div className="sidebar-title">
-                <span>{zh ? "世界索引" : "WORLD INDEX"}</span>
+                <span>{"WORLD INDEX"}</span>
                 <b>{String(world.nodes.length).padStart(2, "0")}</b>
               </div>
               <div className="district-search">
                 <Search size={14} />
                 <input
                   aria-label="Find district"
-                  placeholder={zh ? "查找区域…" : "Find a district…"}
+                  placeholder={"Find a district…"}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                 />
@@ -296,11 +290,11 @@ export function ExplorerPage({
                     <ChevronRight size={12} />
                   </button>
                 ))}
-                {!filtered.length && <p className="empty-note">{zh ? "没有匹配的区域" : "No matching districts."}</p>}
+                {!filtered.length && <p className="empty-note">{"No matching districts."}</p>}
               </div>
               <div className="sidebar-bottom">
                 <div className="sidebar-metric">
-                  <span>{zh ? "语言" : "PRIMARY LANGUAGE"}</span>
+                  <span>{"PRIMARY LANGUAGE"}</span>
                   <b>{world.repo.language ?? "Mixed"}</b>
                 </div>
                 <div className="language-bar">
@@ -324,7 +318,7 @@ export function ExplorerPage({
                 <>
                   <WorldCanvas world={world} style={style} selectedId={selectedId} onSelect={select} />
                   <div className="stage-heading">
-                    <span className="stage-eyebrow">{zh ? styleInfo.zh : styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
+                    <span className="stage-eyebrow">{styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
                     <h1>
                       {world.repo.name}
                       <span>↗</span>
@@ -334,58 +328,56 @@ export function ExplorerPage({
                   <div className="stage-tools">
                     <button className={showLayers ? "active" : ""} onClick={() => setShowLayers(!showLayers)}>
                       <Layers3 size={15} />
-                      {zh ? "图层说明" : "Map legend"}
+                      {"Map legend"}
                     </button>
                     {showLayers && (
                       <div className="map-legend">
-                        <strong>{zh ? "你正在看到什么" : "READING THE WORLD"}</strong>
+                        <strong>{"READING THE WORLD"}</strong>
                         <p>
                           <i className="legend-node" />
-                          {zh ? "建筑是仓库模块" : "Buildings are repository modules"}
+                          {"Buildings are repository modules"}
                         </p>
                         <p>
                           <i className="legend-edge" />
-                          {zh ? "路线是有标注的依赖关系" : "Routes are labeled relationships"}
+                          {"Routes are labeled relationships"}
                         </p>
                         <p>
                           <span className="status-active node-status" />
-                          {zh ? "进展基于 GitHub 快照" : "Activity comes from GitHub snapshots"}
+                          {"Activity comes from GitHub snapshots"}
                         </p>
                         <small>
-                          {zh ? "流动粒子是示意动画，不是实际运行流量。" : "Moving particles illustrate connections, not runtime traffic."}
+                          {"Moving particles illustrate connections, not runtime traffic."}
                         </small>
                       </div>
                     )}
                   </div>
                   <div className="world-caption">
                     <ShieldCheck size={12} />
-                    {zh ? "源文件驱动的世界 · 动画仅作连接示意" : "SOURCE-DRIVEN WORLD · MOTION ILLUSTRATES CONNECTIONS"}
+                    {"SOURCE-DRIVEN WORLD · MOTION ILLUSTRATES CONNECTIONS"}
                   </div>
                 </>
               ) : tab === "activity" ? (
                 <div className="activity-view" key="activity">
                   <div className="eyebrow">THE WORK IN MOTION</div>
-                  <h1>{zh ? "这个世界，正在发生什么？" : "Every change leaves a mark."}</h1>
+                  <h1>{"Every change leaves a mark."}</h1>
                   <p>
-                    {zh
-                      ? "来自 GitHub 的真实事件。采集窗口与来源始终可见。"
-                      : "Real events from GitHub, with their source and observation window."}
+                    {"Real events from GitHub, with their source and observation window."}
                   </p>
                   <div className="activity-summary">
                     <div>
                       <GitPullRequest size={20} />
                       <b>{world.pulls.length}</b>
-                      <span>{zh ? "窗口内公开 PR" : "pull requests in window"}</span>
+                      <span>{"pull requests in window"}</span>
                     </div>
                     <div>
                       <Box size={20} />
                       <b>{world.issues.length}</b>
-                      <span>{zh ? "窗口内 Issue" : "issues in window"}</span>
+                      <span>{"issues in window"}</span>
                     </div>
                     <div>
                       <Activity size={20} />
                       <b>{world.workflows.length}</b>
-                      <span>{zh ? "近期运行" : "recent workflow runs"}</span>
+                      <span>{"recent workflow runs"}</span>
                     </div>
                   </div>
                   <h3 className="section-kicker">CI / CD</h3>
@@ -415,12 +407,10 @@ export function ExplorerPage({
                     ))
                   ) : (
                     <p className="empty-note">
-                      {zh
-                        ? "未获得 workflow 运行证据。没有记录不代表全部通过。"
-                        : "No workflow evidence was returned. An empty window does not mean CI passed."}
+                      {"No workflow evidence was returned. An empty window does not mean CI passed."}
                     </p>
                   )}
-                  <h3 className="section-kicker">{zh ? "最近提交" : "RECENT COMMITS"}</h3>
+                  <h3 className="section-kicker">{"RECENT COMMITS"}</h3>
                   {world.commits.map((c) => (
                     <a key={c.id} className="commit-row" href={c.url} target="_blank" rel="noreferrer">
                       <GitCommitHorizontal size={16} />
@@ -433,7 +423,7 @@ export function ExplorerPage({
                       <code>{c.id.slice(0, 7)}</code>
                     </a>
                   ))}
-                  <h3 className="section-kicker">{zh ? "公开工作队列" : "PUBLIC WORK QUEUE"}</h3>
+                  <h3 className="section-kicker">{"PUBLIC WORK QUEUE"}</h3>
                   {[...world.pulls, ...world.issues].slice(0, 20).map((w) => (
                     <a className="work-item-row" key={`${w.kind}${w.number}`} href={w.url} target="_blank" rel="noreferrer">
                       {w.kind === "pull" ? <GitPullRequest size={15} /> : <Box size={15} />}
@@ -454,28 +444,24 @@ export function ExplorerPage({
                     <Sparkles size={28} />
                   </div>
                   <div className="eyebrow">YOUR REPOSITORY FIELD GUIDE</div>
-                  <h1>{zh ? "看懂全局，找到下一步。" : "See the whole. Find your next move."}</h1>
+                  <h1>{"See the whole. Find your next move."}</h1>
                   <p className="guide-summary">{world.blueprint.summary}</p>
                   <p>{world.blueprint.narrative}</p>
                   <div className="guide-provider">
                     <Sparkles size={13} />
                     {world.blueprint.generator.provider === "rules"
-                      ? zh
-                        ? "确定性架构分析"
-                        : "Evidence-based architecture analysis"
+                      ? "Evidence-based architecture analysis"
                       : `${world.blueprint.generator.model} · $${world.blueprint.generator.costUsd.toFixed(4)}`}
                     <button onClick={() => void generate()} disabled={generating || !budget?.configured || budget.remainingUsd <= 0}>
                       {generating ? <LoaderCircle className="spin" size={13} /> : <ArrowRight size={13} />}{" "}
-                      {zh ? "生成 AI 探索手册" : "Generate AI field guide"}
+                      {"Generate AI field guide"}
                     </button>
                   </div>
                   {budget && (!budget.configured || budget.remainingUsd <= 0) && (
-                    <p role="status">{zh ? "AI 导览未启用：未配置服务或可用预算为零。来源与确定性分析仍可使用。" : "AI guide disabled: provider is unconfigured or available budget is zero. Sources and deterministic analysis remain available."}</p>
+                    <p role="status">{"AI guide disabled: provider is unconfigured or available budget is zero. Sources and deterministic analysis remain available."}</p>
                   )}
                   <p className="repo-disclosure">
-                    {zh
-                      ? "AI 导览使用部分公开仓库路径、架构摘要和项目动态。生成时会将这些数据发送给配置的 AI 服务。"
-                      : "The AI guide uses a limited survey of public repository paths, architecture and activity, sent to the configured AI provider when you generate it."}
+                    {"The AI guide uses a limited survey of public repository paths, architecture and activity, sent to the configured AI provider when you generate it."}
                   </p>
                   {world.blueprint.generator.notes.length > 0 && (
                     <div className="guide-notes">
@@ -484,7 +470,7 @@ export function ExplorerPage({
                       ))}
                     </div>
                   )}
-                  <h3 className="section-kicker">{zh ? "区域指南" : "DISTRICT GUIDE"}</h3>
+                  <h3 className="section-kicker">{"DISTRICT GUIDE"}</h3>
                   <div className="district-guide-grid">
                     {world.blueprint.districts.map((d) => (
                       <button key={d.nodeId} onClick={() => select(d.nodeId)}>
@@ -494,7 +480,7 @@ export function ExplorerPage({
                       </button>
                     ))}
                   </div>
-                  <h3 className="section-kicker">{zh ? "有据可循的下一步" : "EVIDENCE-LINKED NEXT MOVES"}</h3>
+                  <h3 className="section-kicker">{"EVIDENCE-LINKED NEXT MOVES"}</h3>
                   {world.blueprint.missions.length ? (
                     world.blueprint.missions.map((m, i) => (
                       <article className="mission-card" key={m.id}>
@@ -503,7 +489,7 @@ export function ExplorerPage({
                           <span className="mission-priority">{m.priority.toUpperCase()} PRIORITY · SUGGESTION</span>
                           <h3>{m.title}</h3>
                           <p>{m.description}</p>
-                          {m.url && <External href={m.url}>{zh ? "查看来源" : "View source"}</External>}
+                          {m.url && <External href={m.url}>{"View source"}</External>}
                           {m.nodeIds
                             .filter((id) => world.nodes.some((n) => n.id === id))
                             .map((id) => (
@@ -517,7 +503,7 @@ export function ExplorerPage({
                     ))
                   ) : (
                     <p className="empty-note">
-                      {zh ? "还没有足够证据提出具体建议。" : "No specific recommendations without enough evidence."}
+                      {"No specific recommendations without enough evidence."}
                     </p>
                   )}
                 </div>
@@ -534,7 +520,7 @@ export function ExplorerPage({
                     title={s.subtitle}
                   >
                     <span>{s.glyph}</span>
-                    <strong>{zh ? s.zh : s.name}</strong>
+                    <strong>{s.name}</strong>
                     {style === s.id && <i />}
                   </button>
                 ))}
@@ -542,7 +528,7 @@ export function ExplorerPage({
             </section>
             <aside className="inspector">
               <div className="inspector-title">
-                <span>{selected ? (zh ? "区域详情" : "DISTRICT INTELLIGENCE") : zh ? "世界概览" : "WORLD INTELLIGENCE"}</span>
+                <span>{selected ? ("DISTRICT INTELLIGENCE") : "WORLD INTELLIGENCE"}</span>
                 {selected && (
                   <button aria-label="Close district" onClick={() => select(null)}>
                     <X size={14} />
@@ -559,31 +545,27 @@ export function ExplorerPage({
                     <div className={`evidence-badge ${selected.confidence}`}>
                       <ShieldCheck size={11} />
                       {selected.confidence === "observed"
-                        ? zh
-                          ? "从源文件确认"
-                          : "SOURCE OBSERVED"
-                        : zh
-                          ? "基于结构推断"
-                          : "STRUCTURE INFERRED"}
+                        ? "SOURCE OBSERVED"
+                        : "STRUCTURE INFERRED"}
                     </div>
                     <h2>{selected.label}</h2>
                     <code className="path-label">{selected.path || "/"}</code>
                     <p>{world.blueprint.districts.find((d) => d.nodeId === selected.id)?.purpose || selected.description}</p>
                     <dl className="node-facts">
                       <div>
-                        <dt>{zh ? "类型" : "TYPE"}</dt>
+                        <dt>{"TYPE"}</dt>
                         <dd>{selected.kind}</dd>
                       </div>
                       <div>
-                        <dt>{zh ? "状态证据" : "STATUS"}</dt>
+                        <dt>{"STATUS"}</dt>
                         <dd>{selected.status}</dd>
                       </div>
                       <div>
-                        <dt>{zh ? "语言" : "LANGUAGE"}</dt>
+                        <dt>{"LANGUAGE"}</dt>
                         <dd>{selected.language ?? "—"}</dd>
                       </div>
                     </dl>
-                    <h4>{zh ? "来源证据" : "SOURCE EVIDENCE"}</h4>
+                    <h4>{"SOURCE EVIDENCE"}</h4>
                     {selected.evidence.map((e, i) => (
                       <External key={i} href={e.startsWith("https:") ? e : sourceUrl(world, e)} className="evidence-link">
                         <FileCode2 size={12} />
@@ -591,9 +573,9 @@ export function ExplorerPage({
                       </External>
                     ))}
                     <External className="view-source-button" href={sourceUrl(world, selected.path)}>
-                      {zh ? "打开 GitHub 源文件" : "Inspect on GitHub"}
+                      {"Inspect on GitHub"}
                     </External>
-                    <h4>{zh ? "关联区域" : "CONNECTED DISTRICTS"}</h4>
+                    <h4>{"CONNECTED DISTRICTS"}</h4>
                     {world.edges
                       .filter((e) => e.source === selected.id || e.target === selected.id)
                       .map((e) => {
@@ -623,47 +605,40 @@ export function ExplorerPage({
                     <Activity size={15} />
                     <span>{ci?.label}</span>
                   </div>
+                  <p className="repository-license">License: <strong>{world.repo.license ?? "unknown"}</strong> · <External href={world.repo.url}>GitHub metadata source</External></p>
                   <div className="overview-stats">
                     <div>
                       <b>{world.nodes.length}</b>
-                      <span>{zh ? "个区域" : "districts"}</span>
+                      <span>{"districts"}</span>
                     </div>
                     <div>
                       <b>{world.edges.length}</b>
-                      <span>{zh ? "条连接" : "connections"}</span>
+                      <span>{"connections"}</span>
                     </div>
                     <div>
                       <b>{shortNumber(world.repo.stars)}</b>
-                      <span>{zh ? "颗星" : "stars"}</span>
+                      <span>{"stars"}</span>
                     </div>
                   </div>
                   <div className="explore-tip">
                     <Map size={18} />
                     <p>
-                      {zh
-                        ? "点击建筑或左侧索引，查看它的职责和源文件证据。"
-                        : "Select a building or a district in the index to discover its role and source evidence."}
+                      {"Select a building or a district in the index to discover its role and source evidence."}
                     </p>
                   </div>
                   <button className="guide-cta" onClick={() => setTab("guide")}>
                     <Sparkles size={16} />
-                    <span>{zh ? "打开探索手册" : "Open the field guide"}</span>
+                    <span>{"Open the field guide"}</span>
                     <ArrowRight size={14} />
                   </button>
-                  <h4>{zh ? "采集范围" : "OBSERVATION WINDOW"}</h4>
+                  <h4>{"OBSERVATION WINDOW"}</h4>
                   <div className="coverage-note">
                     <p>
                       {world.coverage.tree === "full"
-                        ? zh
-                          ? "已获取仓库路径树"
-                          : "Repository path tree available"
+                        ? "Repository path tree available"
                         : world.coverage.tree === "truncated"
-                          ? zh
-                            ? "路径树部分截取"
-                            : "Path tree partially sampled"
-                          : zh
-                            ? "路径树不可用"
-                            : "Path tree unavailable"}
+                          ? "Path tree partially sampled"
+                          : "Path tree unavailable"}
                     </p>
                     <p>
                       {world.issues.length} issues · {world.pulls.length} PRs · {world.workflows.length} CI runs
@@ -673,14 +648,14 @@ export function ExplorerPage({
                     ))}
                   </div>
                   <External className="view-source-button" href={world.repo.url}>
-                    {zh ? "在 GitHub 查看项目" : "View repository on GitHub"}
+                    {"View repository on GitHub"}
                   </External>
                 </div>
               )}
               <div className="inspector-bottom">
                 <span>
                   <ShieldCheck size={12} />
-                  {zh ? "公开数据 · 只读" : "PUBLIC DATA · READ-ONLY"}
+                  {"PUBLIC DATA · READ-ONLY"}
                 </span>
                 {budget && (
                   <span title="Persisted API cost estimate; all providers share this cap.">
@@ -693,17 +668,17 @@ export function ExplorerPage({
           <footer className="explorer-footer">
             <a href={appPath("/")}>
               <ArrowLeft size={11} />
-              {zh ? "返回任务中心" : "MISSION CONTROL"}
+              {"MISSION CONTROL"}
             </a>
             <span>
               <span className="signal-dot" />
-              {zh ? "AI 支持：Meta Muse Spark 1.3" : "Powered by Meta Muse Spark 1.3"}
+              {"Powered by Meta Muse Spark 1.3"}
             </span>
-            <span>{zh ? "架构推断已标注 · 不代表运行时拓扑" : "ARCHITECTURE INFERENCE LABELED · NOT RUNTIME TELEMETRY"}</span>
+            <span>{"ARCHITECTURE INFERENCE LABELED · NOT RUNTIME TELEMETRY"}</span>
           </footer>
         </>
       )}
-      {!world && <footer className="explorer-footer"><a href={appPath("/")}>{zh ? "返回首页" : "HOME"}</a><span>{zh ? "AI 支持：Meta Muse Spark 1.3" : "Powered by Meta Muse Spark 1.3"}</span></footer>}
+      {!world && <footer className="explorer-footer"><a href={appPath("/")}>{"HOME"}</a><span>{"Powered by Meta Muse Spark 1.3"}</span></footer>}
     </div>
   );
 }

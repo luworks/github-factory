@@ -36,7 +36,7 @@ test("uncached catalog cannot present editorial metadata as captured facts", () 
 });
 
 test("initial English landing disables uncached world links without fabricated star counts", () => {
-  const html = renderToStaticMarkup(createElement(LandingPage, { lang: "en", onLangChange: () => {} }));
+  const html = renderToStaticMarkup(createElement(LandingPage));
   const cards = [...html.matchAll(/<a class="project-card" href="([^"]+)"/g)].map((match) => match[1]);
   expect(cards).toEqual([]);
   expect([...html.matchAll(/aria-disabled="true"/g)]).toHaveLength(19);

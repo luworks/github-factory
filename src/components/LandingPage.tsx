@@ -15,15 +15,14 @@ import {
   ShieldCheck,
   Layers3,
 } from "lucide-react";
-import type { FeaturedProject, Lang, StyleId } from "../contracts";
+import type { FeaturedProject, StyleId } from "../contracts";
 import { WorldCanvas } from "../world/WorldCanvas";
 import { illustration, STYLES } from "../client/demo";
 import { createWorld, getGallery, shortNumber } from "../client/api";
-import { Brand, LanguageButton } from "./shared";
+import { Brand } from "./shared";
 import { RepositoryPreview } from "./RepositoryPreview";
-export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lang) => void }) {
-  const zh = lang === "zh",
-    [repo, setRepo] = useState(""),
+export function LandingPage() {
+  const [repo, setRepo] = useState(""),
     [busy, setBusy] = useState(false),
     [error, setError] = useState<string | null>(null),
     [gallery, setGallery] = useState<readonly FeaturedProject[]>(CURATED_PROJECTS),
@@ -62,14 +61,13 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
       <header className="site-header">
         <Brand />
         <nav>
-          <a href="#worlds">{zh ? "探索世界" : "Explore worlds"}</a>
-          <a href="#perspectives">{zh ? "五种视角" : "Perspectives"}</a>
-          <LanguageButton lang={lang} onChange={onLangChange} />
+          <a href="#worlds">{"Explore worlds"}</a>
+          <a href="#perspectives">{"Perspectives"}</a>
           <a className="header-cta" href="#launch">
-            {zh ? "创建世界" : "Build a world"}
+            {"Build a world"}
             <ArrowUpRight size={14} />
           </a>
-          <a className="header-repo-link" href="https://github.com/luworks/github-factory" target="_blank" rel="noopener noreferrer" aria-label={zh ? "GitHub 源码仓库" : "GitHub source repository"}>
+          <a className="header-repo-link" href="https://github.com/luworks/github-factory" target="_blank" rel="noopener noreferrer" aria-label={"GitHub source repository"}>
             <Github size={14} />
             <span>GitHub</span>
           </a>
@@ -80,16 +78,10 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
           <div className="hero-copy">
             <div className="eyebrow">
               <span className="signal-dot" />
-              {zh ? "给开源一个全新的视角" : "A NEW PERSPECTIVE ON OPEN SOURCE"}
+              {"A NEW PERSPECTIVE ON OPEN SOURCE"}
             </div>
             <h1>
-              {zh ? (
-                <>
-                  每一份代码，
-                  <br />
-                  都有自己的<span>世界。</span>
-                </>
-              ) : (
+              {(
                 <>
                   Every codebase.
                   <br />A world of <em>its own.</em>
@@ -97,9 +89,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
               )}
             </h1>
             <p className="hero-description">
-              {zh
-                ? "把公开 GitHub 仓库变成一个可探索的世界。看懂架构，发现正在发生的变化，找到你的下一次贡献。"
-                : "Turn a public GitHub repository into a living, explorable world. See the architecture. Follow the work. Find where you belong."}
+              {"Turn a public GitHub repository into a living, explorable world. See the architecture. Follow the work. Find where you belong."}
             </p>
             <form className={`repo-form ${busy ? "is-busy" : ""}`} onSubmit={submit}>
               <Github size={21} />
@@ -120,24 +110,20 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
               />
               <button
                 type="submit"
-                aria-label={busy ? (zh ? "勘测中" : "Mapping") : zh ? "生成世界" : "Generate world"}
+                aria-label={busy ? ("Mapping") : "Generate world"}
                 disabled={!ready || busy || !repo.trim()}
               >
                 {busy ? <LoaderCircle className="spin" size={18} /> : <ArrowRight size={20} />}
-                <span>{busy ? (zh ? "勘测中" : "Mapping") : zh ? "生成世界" : "Generate world"}</span>
+                <span>{busy ? ("Mapping") : "Generate world"}</span>
               </button>
             </form>
             <p className="repo-disclosure">
-              {zh
-                ? "接受任何可公开访问的 GitHub 仓库网址；许可证按来源展示。生成 AI 导览时，会将部分仓库路径、架构摘要和项目动态发送给配置的 AI 服务。"
-                : "Enter any publicly accessible GitHub repository URL; license metadata is shown as reported. Generating an AI guide sends a limited survey of paths, architecture and activity to the configured AI provider."}
+              {"Enter any publicly accessible GitHub repository URL; license metadata is shown as reported. Generating an AI guide sends a limited survey of paths, architecture and activity to the configured AI provider."}
             </p>
             {busy && (
               <div role="status" className="mapping-status">
                 <span className="signal-dot" />
-                {zh
-                  ? "正在读取公开代码结构与项目进展。大型仓库可能需要一点时间。"
-                  : "Surveying public source, architecture and activity. Large repositories may take a moment."}
+                {"Surveying public source, architecture and activity. Large repositories may take a moment."}
               </div>
             )}
             {error && (
@@ -146,7 +132,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
               </div>
             )}
             <div className="hero-examples">
-              <span>{zh ? "试试" : "TRY"}</span>
+              <span>{"TRY"}</span>
               {["openclaw/openclaw", "react/react", "pingdotgg/t3code"].map((r) => (
                 <button key={r} onClick={() => setRepo(`https://github.com/${r}`)} disabled={!ready || busy || !gallery.some((p) => p.fullName === r && p.ready)}>
                   {r.split("/")[1]}
@@ -157,11 +143,11 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             <div className="hero-assurances">
               <span>
                 <Github size={13} />
-                {zh ? "公开仓库 · 只读" : "Public repos. Read-only."}
+                {"Public repos. Read-only."}
               </span>
               <span>
                 <Layers3 size={13} />
-                {zh ? "五个世界 · 同一份事实" : "Five worlds. One source of truth."}
+                {"Five worlds. One source of truth."}
               </span>
             </div>
           </div>
@@ -182,7 +168,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             </div>
             <div className="hero-scene-note">
               <span>01</span>
-              <p>{zh ? "不是又一个看板。是你可以走进去的代码。" : "Not another dashboard. A codebase you can step into."}</p>
+              <p>{"Not another dashboard. A codebase you can step into."}</p>
             </div>
           </div>
         </section>
@@ -191,24 +177,24 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             <span className="strip-number">01 /</span>
             <Box size={18} />
             <p>
-              {zh ? "架构变成地点" : "Architecture becomes a place"}
-              <small>{zh ? "模块、服务和依赖，终于一目了然。" : "Modules, services and dependencies. Finally, a mental map."}</small>
+              {"Architecture becomes a place"}
+              <small>{"Modules, services and dependencies. Finally, a mental map."}</small>
             </p>
           </div>
           <div>
             <span className="strip-number">02 /</span>
             <Activity size={18} />
             <p>
-              {zh ? "进展变成故事" : "Progress becomes a story"}
-              <small>{zh ? "真正的 Issue、PR 与 CI，持续更新。" : "Real issues, pull requests and CI. Always in context."}</small>
+              {"Progress becomes a story"}
+              <small>{"Real issues, pull requests and CI. Always in context."}</small>
             </p>
           </div>
           <div>
             <span className="strip-number">03 /</span>
             <Globe2 size={18} />
             <p>
-              {zh ? "贡献从此有方向" : "Contribution finds a direction"}
-              <small>{zh ? "有证据的 AI 解说，帮你找到下一步。" : "Evidence-linked AI guidance to find your next move."}</small>
+              {"Contribution finds a direction"}
+              <small>{"Evidence-linked AI guidance to find your next move."}</small>
             </p>
           </div>
         </section>
@@ -216,10 +202,10 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
           <div className="section-heading">
             <div>
               <div className="eyebrow">THE OPEN-SOURCE ATLAS</div>
-              <h2>{zh ? "世界已备好，等你探索。" : "Great projects. Uncharted worlds."}</h2>
+              <h2>{"Great projects. Uncharted worlds."}</h2>
             </div>
             <span className="quiet-label">
-              {zh ? `${gallery.length} 个精选热门公开项目` : `${gallery.length} CURATED POPULAR PROJECTS`}
+              {`${gallery.length} CURATED POPULAR PROJECTS`}
               <ArrowUpRight size={15} />
             </span>
           </div>
@@ -228,7 +214,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
               <div className="project-card-shell" key={p.fullName}>
               <a className="project-card" href={p.ready ? appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`) : undefined} aria-disabled={!p.ready} tabIndex={p.ready ? undefined : -1} onClick={(e) => { if (!p.ready) e.preventDefault(); }} >
                 <div className="project-art">
-                  <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} lang={lang} enabled={galleryLoaded} />
+                  <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} enabled={galleryLoaded} />
                   <span className="project-category">{p.category}</span>
                   <span className="project-arrow">
                     <ArrowUpRight size={18} />
@@ -250,14 +236,14 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
                       </span>
                     )}
                     <span className="project-ready">
-                      {p.ready ? (zh ? "探索世界" : "Explore world") : (zh ? "地图暂不可用" : "Map unavailable")}
+                      {p.ready ? ("Explore world") : ("Map unavailable")}
                       <ArrowRight size={12} />
                     </span>
                   </div>
                 </div>
               </a>
-              <a className="project-source-link" href={`https://github.com/${p.fullName}`} target="_blank" rel="noopener noreferrer" aria-label={`${zh ? "GitHub 来源" : "GitHub source"}: ${p.fullName}`}>
-                <Github size={11} /> {zh ? "来源" : "Source"}
+              <a className="project-source-link" href={`https://github.com/${p.fullName}`} target="_blank" rel="noopener noreferrer" aria-label={`${"GitHub source"}: ${p.fullName}`}>
+                <Github size={11} /> {"Source"}
               </a>
               </div>
             ))}
@@ -266,11 +252,9 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
         <section className="perspectives-section" id="perspectives">
           <div className="perspective-copy">
             <div className="eyebrow">SAME CODE. DIFFERENT WORLDS.</div>
-            <h2>{zh ? "选一个你想住进的世界。" : "Find your kind of world."}</h2>
+            <h2>{"Find your kind of world."}</h2>
             <p>
-              {zh
-                ? "工业传送带、军事基地、六边形文明，或是一座月面殖民地。换一个视角，事实始终一致。"
-                : "Industrial belts. Command bases. Hex-tile civilizations. Or a colony on the moon. Change the lens, keep the truth."}
+              {"Industrial belts. Command bases. Hex-tile civilizations. Or a colony on the moon. Change the lens, keep the truth."}
             </p>
           </div>
           <div className="style-options">
@@ -284,7 +268,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
                 }}
               >
                 <span className={`style-symbol symbol-${s.id}`}>{s.glyph}</span>
-                <strong>{zh ? s.zh : s.name}</strong>
+                <strong>{s.name}</strong>
                 <small>{s.subtitle}</small>
                 <ArrowUpRight size={13} />
               </button>
@@ -293,19 +277,19 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
         </section>
         <section className="closing-line">
           <span className="closing-orbit">◒</span>
-          <h2>{zh ? "代码不该只被阅读。\n它应该被探索。" : "Code was meant to be explored."}</h2>
+          <h2>{"Code was meant to be explored."}</h2>
           <a href="#launch">
-            {zh ? "你的世界，从这里开始" : "Your world starts here"}
+            {"Your world starts here"}
             <ArrowRight size={18} />
           </a>
         </section>
       </main>
       <footer className="site-footer">
         <Brand compact />
-        <span>{zh ? "为开源的好奇心而造。" : "BUILT FOR THE CURIOUS. BUILT ON OPEN SOURCE."}</span>
+        <span>{"BUILT FOR THE CURIOUS. BUILT ON OPEN SOURCE."}</span>
         <p>
           <ShieldCheck size={13} />
-          {zh ? "AI 支持：Meta Muse Spark 1.3" : "Powered by Meta Muse Spark 1.3"}
+          {"Powered by Meta Muse Spark 1.3"}
         </p>
       </footer>
     </div>
