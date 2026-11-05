@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import { getConfig } from "./config";
 import { D1WorldStore } from "./d1-store";
-import { GitHubClient, type Fetcher } from "./github";
+import { GitHubClient, type Fetcher, type CollectionObservation } from "./github";
 import { PublicGitHubQuota } from "./public-quota";
 import { WorldStore, worldStorePath } from "./store";
 import type { SnapshotStore } from "./world-storage";
@@ -32,7 +32,7 @@ export function createWorldResources(config: ReturnType<typeof getConfig>, optio
         ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret, databaseId: config.d1DatabaseId })
         : new WorldStore(worldStorePath(config.dataDir));
     },
-    collector: { collect: (ref: Parameters<GitHubClient["collect"]>[0]) => (collector ??= new GitHubClient(config.githubToken, quota.wrap(network))).collect(ref) },
+    collector: { collect: (ref: Parameters<GitHubClient["collect"]>[0], context?: CollectionObservation) => (collector ??= new GitHubClient(config.githubToken, quota.wrap(network))).collect(ref, context) },
   };
 }
 let singleton: ReturnType<typeof createWorldResources> | undefined;

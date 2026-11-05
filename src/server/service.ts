@@ -1,14 +1,14 @@
 import { CURATED_PROJECTS } from "../catalog";
 import type { FeaturedProject, WorldSnapshot } from "../contracts";
 import { analyzeCollection } from "./analysis";
-import { GitHubError, parseRepo, type RepoCollection, type RepoRef } from "./github";
+import { GitHubError, parseRepo, createCollectionObservation, takePrivateRepositoryObservation, type CollectionObservation, type RepoCollection, type RepoRef } from "./github";
 import { getWorldResources } from "./world-resources";
 import { isRenderableWorld } from "./world-readiness";
 import { WorldStorageError, type CachedWorld, type SnapshotStore, type WorldStorageStatus, type PublicCaptureGeneration } from "./world-storage";
 import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
 
 interface Collector {
-  collect(ref: RepoRef): Promise<RepoCollection>;
+  collect(ref: RepoRef, context?: CollectionObservation): Promise<RepoCollection>;
 }
 
 /** Injectable service factory keeps tests deterministic and prevents all network access on import. */
@@ -91,7 +91,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     const promise = new Promise<WorldSnapshot>((resolve, reject) => { publish = resolve; fail = reject; });
     inflight.set(key, promise);
     const work = (async () => {
-      let generation: PublicCaptureGeneration | undefined, admitted = false;
+      let generation: PublicCaptureGeneration | undefined, collectionContext: CollectionObservation | undefined, admitted = false;
       try {
         requireAnalysisOpen();
         if (authority) {
@@ -101,7 +101,8 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         }
         // A denied legacy GET must not spend collection allowance or fetch.
         settings?.admit?.(); admitted = true;
-        const collected = await options.collector.collect(ref);
+        collectionContext = createCollectionObservation(key, generation);
+        const collected = await options.collector.collect(ref, collectionContext);
 
         const world = analyzeCollection(collected);
         const expiresAt = now() + 90_000;
@@ -122,7 +123,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         if (!admitted) { if (cached) return await fallback(typed, generation); throw error; }
         cooldown.set(key, { until: now() + Math.max(15, Math.min(3600, typed.retryAfter || 15)) * 1000, error: typed });
         if (typed.code === "PUBLIC_ONLY" && typed.status === 403) {
-          if (authority) await authority.revoke(key, generation);
+          if (authority) await authority.revoke(key, generation, generation ? takePrivateRepositoryObservation(error, collectionContext, key, generation) : undefined);
           else await options.store.delete?.(key);
           throw typed;
         }

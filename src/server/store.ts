@@ -3,12 +3,12 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { createHash } from "node:crypto";
 import type { WorldSnapshot } from "../contracts";
-import { parseRepo } from "./github";
+import { parseRepo, trustedPrivateCanonical, type TrustedPrivateRepositoryObservation } from "./github";
 import { isRenderableWorld } from "./world-readiness";
 import { WorldRevocationError, WorldStorageError, type CachedWorld, type WorldSummary, type WorldStorageStatus, type PublicCaptureAuthority, type PublicCaptureGeneration } from "./world-storage";
 export type { CachedWorld } from "./world-storage";
 type Barrier = { sequence: number; denied: number };
-type Generation = { repo: string; canonical: string; sequence: number; explicit: boolean; ended: boolean; revocation?: { sequence?: number; keys: string[]; error?: WorldRevocationError } };
+type Generation = { repo: string; canonical: string; sequence: number; explicit: boolean; ended: boolean; revocation?: { sequence?: number; roots: string[]; keys: string[]; error?: WorldRevocationError } };
 const keyOf = (repo: string) => parseRepo(repo).fullName.toLowerCase();
 const unavailable = (): never => { throw new WorldStorageError(); };
 const controlDigest = (sequence: number, rows: { repo: string; sequence: number; denied: number }[]) => createHash("sha256").update(JSON.stringify([sequence, rows.map(row => [row.repo, row.sequence, row.denied])])).digest("hex");
@@ -24,7 +24,7 @@ export class WorldStore {
     begin: (repo, options) => this.beginCapture(repo, options),
     assert: generation => this.assertCapture(generation),
     commit: (generation, world, ttl?: number, now?: number) => this.commitCapture(generation, world, ttl, now),
-    revoke: (repo, observation?: PublicCaptureGeneration) => this.revokeCapture(repo, observation),
+    revoke: (repo, observation?: PublicCaptureGeneration, privateObservation?: TrustedPrivateRepositoryObservation) => this.revokeCapture(repo, observation, privateObservation),
   } satisfies PublicCaptureAuthority;
   constructor(path: string) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -133,28 +133,32 @@ export class WorldStore {
       }).immediate();
     } catch { return unavailable(); }
   }
-  private revokeCapture(repo: string, token?: PublicCaptureGeneration): { barrier: "confirmed"; cleanup: "confirmed" } {
+  private revokeCapture(repo: string, token?: PublicCaptureGeneration, privateObservation?: TrustedPrivateRepositoryObservation): { barrier: "confirmed"; cleanup: "confirmed" } {
     const key = keyOf(repo), generation = token ? this.generations.get(token) : undefined;
-    if (token && (!generation || generation.repo !== key)) return unavailable();
+    if (token !== undefined && (!generation || generation.repo !== key)) return unavailable();
+    const canonical = privateObservation === undefined ? undefined : trustedPrivateCanonical(privateObservation, key, token);
+    if (privateObservation !== undefined && !canonical) return unavailable();
+    const roots = [...new Set([key, ...(canonical ? [canonical] : [])])].sort();
     if (generation?.revocation) {
       const previous = generation.revocation;
+      if (JSON.stringify(previous.roots) !== JSON.stringify(roots)) return unavailable();
       if (previous.error) throw previous.error;
       const control = this.control();
       if (previous.keys.some(repo => control.barriers.get(repo)?.sequence !== previous.sequence || control.barriers.get(repo)?.denied !== 1)) return unavailable();
       return { barrier: "confirmed", cleanup: "confirmed" };
     }
     if (generation?.ended) return unavailable();
-    const observation: NonNullable<Generation["revocation"]> = { keys: [key] };
+    const observation: NonNullable<Generation["revocation"]> = { roots, keys: roots };
     if (generation) { generation.ended = true; generation.revocation = observation; }
-    this.unconfirmedDenials.add(key);
+    for (const repo of roots) this.unconfirmedDenials.add(repo);
     let confirmed = false;
     try {
       // FIRST independently commit the deny barrier. Cleanup must never roll it
       // back; a failed barrier write is not a durable guarantee or zero writes.
       this.db.transaction(() => {
-        const control = this.control(), canonical = this.canonical(key);
-        const aliases = this.db.query("SELECT alias FROM world_aliases WHERE canonical=?").all(canonical) as { alias: string }[];
-        observation.keys = [...new Set([key, canonical, ...aliases.map(row => keyOf(row.alias))])];
+        const control = this.control(), targets = [...new Set([...roots, ...roots.map(repo => this.canonical(repo))])];
+        const aliases = targets.flatMap(target => this.db.query("SELECT alias FROM world_aliases WHERE canonical=?").all(target) as { alias: string }[]);
+        observation.keys = [...new Set([...targets, ...aliases.map(row => keyOf(row.alias))])];
         for (const repo of observation.keys) this.unconfirmedDenials.add(repo);
         const sequence = this.nextSequence(control.sequence);
         for (const repo of observation.keys) if (this.db.query("INSERT INTO world_public_barriers VALUES(?,?,1) ON CONFLICT(repo) DO UPDATE SET sequence=excluded.sequence,denied=1").run(repo, sequence).changes !== 1) return unavailable();

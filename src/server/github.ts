@@ -36,6 +36,49 @@ export class GitHubError extends Error {
   }
 }
 
+declare const collectionObservationBrand: unique symbol;
+declare const privateObservationBrand: unique symbol;
+/** Server-only opaque identities; serialized fields/classes are not authority. */
+export interface CollectionObservation { readonly [collectionObservationBrand]: true }
+export interface TrustedPrivateRepositoryObservation { readonly [privateObservationBrand]: true }
+type ObservationState = { input: string; generation?: object; invocation?: object; settled: boolean };
+const collectionObservations = new WeakMap<CollectionObservation, ObservationState>();
+const privateRejections = new WeakMap<object, { context: CollectionObservation; invocation: object; input: string; canonical: string; consumed: boolean }>();
+const privateTargets = new WeakMap<TrustedPrivateRepositoryObservation, { input: string; canonical: string; generation: object }>();
+
+export function createCollectionObservation(input: string, generation?: object): CollectionObservation {
+  if (generation !== undefined && (!generation || typeof generation !== "object")) throw new GitHubError("INVALID_COLLECTION_CONTEXT", 503, "Repository collection context is unavailable.");
+  const context = Object.freeze({}) as CollectionObservation;
+  collectionObservations.set(context, { input: parseRepo(input).fullName.toLowerCase(), generation, settled: false }); return context;
+}
+/** Only the error minted by THIS actual collect invocation may produce a
+ * grouped-revoke capability bound to THIS original store generation. */
+export function takePrivateRepositoryObservation(error: unknown, context: CollectionObservation | undefined, input: string, generation: object): TrustedPrivateRepositoryObservation | undefined {
+  if (!error || typeof error !== "object" || !context || !generation || typeof generation !== "object") return undefined;
+  const proof = privateRejections.get(error), state = collectionObservations.get(context);
+  if (!proof || proof.consumed || !state?.settled || state.generation !== generation || proof.context !== context || proof.invocation !== state.invocation || proof.input !== input || state.input !== input) return undefined;
+  proof.consumed = true;
+  const capability = Object.freeze({}) as TrustedPrivateRepositoryObservation;
+  privateTargets.set(capability, { input, canonical: proof.canonical, generation }); return capability;
+}
+/** Original storage adapter validates the opaque producer capability too; a
+ * caller-supplied array/string/error.canonical cannot request extra targets. */
+export function trustedPrivateCanonical(capability: TrustedPrivateRepositoryObservation, input: string, generation: object | undefined): string | undefined {
+  const proof = capability && privateTargets.get(capability);
+  return proof && proof.input === input && proof.generation === generation ? proof.canonical : undefined;
+}
+
+function privateCanonical(metadata: Json, endpoint: string): string | undefined {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata) || metadata.private !== true || ![undefined, "private", "internal"].includes(metadata.visibility)) return undefined;
+  try {
+    if (typeof metadata.full_name !== "string") return undefined;
+    const ref = parseRepo(metadata.full_name); if (ref.fullName !== metadata.full_name) return undefined;
+    if (endpoint.startsWith("/repos/")) return endpoint.slice(7).toLowerCase() === ref.fullName.toLowerCase() ? ref.fullName.toLowerCase() : undefined;
+    const id = endpoint.match(/^\/repositories\/([1-9]\d{0,19})$/)?.[1];
+    return id && Number.isSafeInteger(metadata.id) && metadata.id > 0 && String(metadata.id) === id ? ref.fullName.toLowerCase() : undefined;
+  } catch { return undefined; }
+}
+
 /** Parse identity only. Never follow an input URL or allow it to select an API host. */
 export function parseRepo(input: string): RepoRef {
   if (typeof input !== "string" || input.length > 300 || input !== input.trim())
@@ -203,6 +246,10 @@ export class GitHubClient {
           ...(this.token ? { Authorization: `Bearer ${this.token}` } : {}),
         },
       });
+      if (metadata && (response.redirected || response.url && response.url !== `https://api.github.com${path}`)) {
+        await response.body?.cancel().catch(() => {});
+        throw new GitHubError("GITHUB_REDIRECT", 502, "Unexpected GitHub metadata response identity.");
+      }
       if (metadata && [301, 302, 307, 308].includes(response.status)) {
         await response.body?.cancel().catch(() => {});
         throw new MetadataRedirect(response.headers.get("location") || "");
@@ -288,7 +335,7 @@ export class GitHubClient {
     }
   }
 
-  private async metadata(ref: RepoRef, deadline: number): Promise<Json> {
+  private async metadata(ref: RepoRef, deadline: number): Promise<{ value: Json; endpoint: string }> {
     let path = `/repos/${ref.owner}/${ref.name}`;
     const seen = new Set<string>();
     const budget = { remaining: GITHUB_LIMITS.metadataRequests };
@@ -296,7 +343,7 @@ export class GitHubClient {
       if (seen.has(path)) throw new GitHubError("GITHUB_REDIRECT", 502, "GitHub repository redirect loop.");
       seen.add(path);
       try {
-        return await this.request(path, 128 * 1024, deadline, budget, true);
+        return { value: await this.request(path, 128 * 1024, deadline, budget, true), endpoint: path };
       } catch (error) {
         if (!(error instanceof MetadataRedirect)) throw error;
         // Only repository metadata can redirect, and credentials never leave this exact origin.
@@ -312,14 +359,27 @@ export class GitHubClient {
     }
   }
 
-  async collect(ref: RepoRef): Promise<RepoCollection> {
+  async collect(ref: RepoRef, context?: CollectionObservation): Promise<RepoCollection> {
     // Revalidate even if an untyped caller supplied a RepoRef object.
     ref = parseRepo(ref.fullName);
+    let observation: { context: CollectionObservation; state: ObservationState; invocation: object } | undefined;
+    if (context !== undefined) {
+      const state = collectionObservations.get(context);
+      if (!state || state.invocation || state.input !== ref.fullName.toLowerCase()) throw new GitHubError("INVALID_COLLECTION_CONTEXT", 503, "Repository collection context is unavailable.");
+      const invocation = {}; state.invocation = invocation; observation = { context, state, invocation };
+    }
+    try { return await this.collectCurrent(ref, observation); }
+    finally { if (observation) observation.state.settled = true; }
+  }
+  private async collectCurrent(ref: RepoRef, observation?: { context: CollectionObservation; state: ObservationState; invocation: object }): Promise<RepoCollection> {
     const deadline = this.now() + GITHUB_LIMITS.collectionMs;
     const read = (path: string, maxBytes?: number) => this.request(path, maxBytes, deadline);
-    const metadata = await this.metadata(ref, deadline);
-    if (!isPublicRepositoryMetadata(metadata))
-      throw new GitHubError("PUBLIC_ONLY", 403, "Only public repositories can be analyzed.");
+    const observed = await this.metadata(ref, deadline), metadata = observed.value;
+    if (!isPublicRepositoryMetadata(metadata)) {
+      const error = new GitHubError("PUBLIC_ONLY", 403, "Only public repositories can be analyzed."), canonical = privateCanonical(metadata, observed.endpoint);
+      if (observation?.state.generation && canonical) privateRejections.set(error, { context: observation.context, invocation: observation.invocation, input: ref.fullName.toLowerCase(), canonical, consumed: false });
+      throw error;
+    }
 
     const canonical = parseRepo(text(metadata.full_name, 150));
     const root = `/repos/${canonical.owner}/${canonical.name}`;

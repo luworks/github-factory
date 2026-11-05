@@ -1,4 +1,5 @@
 import type { RepoIdentity, WorldSnapshot } from "../contracts";
+import type { TrustedPrivateRepositoryObservation } from "./github";
 
 export type Awaitable<T> = T | Promise<T>;
 export interface CachedWorld { world: WorldSnapshot; expiresAt: number; fresh: boolean }
@@ -15,8 +16,10 @@ export interface PublicCaptureAuthority {
    * Snapshot+alias+reopening are one atomic compare-and-commit transition. */
   commit(generation: PublicCaptureGeneration, world: WorldSnapshot, ttlMs?: number, now?: number): Awaitable<void>;
   /** Same generation = same observation (no automatic cleanup retry). Omitting
-   * it denotes a NEW trusted definitive private observation, never eviction. */
-  revoke(repo: string, observation?: PublicCaptureGeneration): Awaitable<{ barrier: "confirmed"; cleanup: "confirmed" }>;
+   * it denotes a NEW trusted definitive private observation, never eviction.
+   * Extra canonical targets require the producer's opaque generation-bound
+   * capability; all input/canonical/known aliases share ONE deny transition. */
+  revoke(repo: string, observation?: PublicCaptureGeneration, privateObservation?: TrustedPrivateRepositoryObservation): Awaitable<{ barrier: "confirmed"; cleanup: "confirmed" }>;
 }
 export interface SnapshotStore {
   get(repo: string, now?: number, options?: { readOnly?: boolean }): Awaitable<CachedWorld | null>;
