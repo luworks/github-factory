@@ -39,3 +39,10 @@ test("SYNTHETIC post-drain receipt expires and new work invalidates restart", as
   expect(() => requireFreshRetirementReceipt(receipt, identity, sample(242_000), 1_030_000)).toThrow();
   expect(() => requireFreshRetirementReceipt(receipt, identity, sample(242_000, { publicReserved: 1 }), 1_000_100)).toThrow();
 });
+
+test("SYNTHETIC retirement cannot promote the current env ledger/copy/symlink to original authority", async () => {
+  const { assertOriginalLedger } = await import("../scripts/retirement-guard");
+  const original = { ledgerPath: "/synthetic/original.sqlite", ledgerRealpath: "/synthetic/original.sqlite", device: 1, inode: 2, receiptPath: "/synthetic/old-receipt.json", receiptSha256: "a".repeat(64) };
+  expect(() => assertOriginalLedger(original.ledgerPath, original, { realpath: original.ledgerRealpath, device: 1, inode: 2 })).not.toThrow();
+  for (const [path, actual] of [["/synthetic/copied.sqlite", { realpath: "/synthetic/copied.sqlite", device: 1, inode: 99 }], [original.ledgerPath, { realpath: original.ledgerRealpath, device: 1, inode: 99 }], ["/synthetic/alias.sqlite", { realpath: original.ledgerRealpath, device: 1, inode: 2 }], [original.ledgerPath, { realpath: "/synthetic/replaced.sqlite", device: 1, inode: 2 }]] as const) expect(() => assertOriginalLedger(path, original, actual)).toThrow();
+});

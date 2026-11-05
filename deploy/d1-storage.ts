@@ -79,7 +79,7 @@ export async function worldStorageRpc(request: Request, env: StorageEnvironment)
       // statement rolls back on any failure. No SQL REST-array assumption.
       const results = await db.batch([
         db.prepare(`INSERT INTO migration_guards(migration_id,source_sha256,accepted)
-          SELECT ?,?,CASE WHEN (SELECT COUNT(*) FROM worlds)=0 AND (SELECT COUNT(*) FROM world_aliases)=0 AND (SELECT COUNT(*) FROM storage_provenance)=0 THEN 1 ELSE 0 END`).bind(source.migrationId, source.sourceSha256),
+          SELECT ?,?,CASE WHEN (SELECT COUNT(*) FROM worlds)=0 AND (SELECT COUNT(*) FROM world_aliases)=0 AND (SELECT COUNT(*) FROM storage_provenance)=0 AND (SELECT COUNT(*) FROM migration_guards)=0 THEN 1 ELSE 0 END`).bind(source.migrationId, source.sourceSha256),
         db.prepare(`INSERT INTO worlds(repo,snapshot,expires_at,saved_at,snapshot_sha256,origin)
           SELECT json_extract(value,'$.repo'),json_extract(value,'$.snapshot'),json_extract(value,'$.expires_at'),json_extract(value,'$.saved_at'),json_extract(value,'$.snapshot_sha256'),? FROM json_each(?)`).bind(`migration:${source.migrationId}`, JSON.stringify(rows)),
         db.prepare(`INSERT INTO world_aliases(alias,canonical) SELECT json_extract(value,'$.alias'),json_extract(value,'$.canonical') FROM json_each(?)`).bind(JSON.stringify(source.aliases)),

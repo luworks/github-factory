@@ -62,3 +62,8 @@ export function requireFreshRetirementReceipt(receipt: { verifiedAtMs: number; e
   const verdict = evaluateRetirement(receipt.verdict.state, current, expected);
   if (!verdict.ready) throw new Error("Retiring workload became active after receipt");
 }
+export interface OriginalLedgerAuthority { ledgerPath: string; ledgerRealpath: string; device: number; inode: number; receiptPath: string; receiptSha256: string }
+export function assertOriginalLedger(path: string, original: OriginalLedgerAuthority, actual: { realpath: string; device: number; inode: number }) {
+  if (!original || path !== original.ledgerPath || !path?.startsWith("/") || actual.realpath !== original.ledgerRealpath || actual.device !== original.device || actual.inode !== original.inode)
+    throw new Error("Ledger is not the independently pinned original authority");
+}

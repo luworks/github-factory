@@ -18,6 +18,11 @@ const secret = "synthetic-storage-secret-32-characters-long";
 const endpoint = "https://chaorders.com/github-factory/_storage";
 const databaseId = "11111111-1111-4111-8111-111111111111";
 const expectedIdentity = { databaseId, bindingNonce: "a".repeat(32), epoch: "b".repeat(32), sourceSha: "c".repeat(40), workerBundleSha256: "d".repeat(64), admissionFenced: true };
+const actualWorkerSettings = () => ({ bindings: [
+ { name: "WORLDS_DB", type: "d1", id: databaseId }, { name: "FACTORY_GATEWAY_SECRET", type: "secret_text" }, { name: "FACTORY_STORAGE_SECRET", type: "secret_text" },
+ ...Object.entries({ FACTORY_STORAGE_MODE: "worlds", FACTORY_ADMISSION_FENCE: expectedIdentity.epoch, FACTORY_ORIGIN: "https://github-factory-origin.chaorders.com", FACTORY_SOURCE_SHA: expectedIdentity.sourceSha, FACTORY_MIGRATION_EPOCH: expectedIdentity.epoch, FACTORY_WORKER_BUNDLE_SHA256: expectedIdentity.workerBundleSha256 }).map(([name,text]) => ({ name, type: "plain_text", text })),
+ { name: "COMPANY_SITE", type: "service", service: "chaorders-site" },
+] });
 const fixtureEnv = { FACTORY_STORAGE_MODE: "worlds", FACTORY_STORAGE_SECRET: secret, FACTORY_STORAGE_DATABASE_ID: databaseId, FACTORY_MIGRATION_EPOCH: expectedIdentity.epoch, FACTORY_SOURCE_SHA: expectedIdentity.sourceSha, FACTORY_WORKER_BUNDLE_SHA256: expectedIdentity.workerBundleSha256, FACTORY_ADMISSION_FENCE: expectedIdentity.epoch };
 const now = Date.parse("2026-11-04T18:00:00Z");
 function fixture(name = "browser-fixture") {
@@ -242,10 +247,10 @@ test("SYNTHETIC full management/RPC gate rejects wrong empty binding, tampered r
     await b.rpc({ op: "migrationImport", export: source, identity: expectedIdentity });
     const response = await (await b.rpc({ op: "migrationSnapshot" })).json();
     const rpc = response.result;
-    const input: MigrationGateInput = { source, expectedIdentity, admin: { ...structuredClone(rpc), databaseId, apiDatabaseId: databaseId, bindingNonce: expectedIdentity.bindingNonce }, rpc,
+    const input: MigrationGateInput = { source, workerSettings: actualWorkerSettings(), expectedIdentity, admin: { ...structuredClone(rpc), databaseId, apiDatabaseId: databaseId, bindingNonce: expectedIdentity.bindingNonce }, rpc,
       candidateSha: expectedIdentity.sourceSha, actualWorkerBundleSha256: expectedIdentity.workerBundleSha256, activeEnvSha256: "a".repeat(64), targetConfigSha256: "b".repeat(64), epoch: expectedIdentity.epoch };
     expect(await verifyMigrationGate(input, now)).toMatchObject({ adminAndFullRpcVerified: true, worldCount: 2, aliasCount: 1, expiresAtMs: now + 30_000 });
-    const receipt = await verifyMigrationGate(input, now), expectedReceipt = { candidateSha: input.candidateSha, activeEnvSha256: input.activeEnvSha256, targetConfigSha256: input.targetConfigSha256, expectedIdentity, exportSha256: source.sourceSha256 };
+    const receipt = await verifyMigrationGate(input, now), expectedReceipt = { candidateSha: input.candidateSha, activeEnvSha256: input.activeEnvSha256, targetConfigSha256: input.targetConfigSha256, expectedIdentity, workerSettings: actualWorkerSettings(), exportSha256: source.sourceSha256 };
     expect(() => requireFreshMigrationReceipt(receipt, expectedReceipt, now + 1)).not.toThrow();
     expect(() => requireFreshMigrationReceipt(receipt, expectedReceipt, now + 30_000)).toThrow("Stale");
     expect(() => requireFreshMigrationReceipt(receipt, { ...expectedReceipt, activeEnvSha256: "f".repeat(64) }, now + 1)).toThrow("Stale");
@@ -253,6 +258,9 @@ test("SYNTHETIC full management/RPC gate rejects wrong empty binding, tampered r
       (x) => { x.rpc.worlds = []; x.rpc.aliases = []; }, (x) => { x.rpc.worlds[0].snapshot += " "; }, (x) => { x.rpc.aliases[0].canonical = "wrong/repo"; },
       (x) => { x.rpc.identity.databaseId = "22222222-2222-4222-8222-222222222222"; }, (x) => { x.rpc.identity.epoch = "f".repeat(32); },
       (x) => { x.rpc.identity.admissionFenced = false; }, (x) => { x.actualWorkerBundleSha256 = "e".repeat(64); }, (x) => { x.candidateSha = "e".repeat(40); },
+      (x) => { (x.workerSettings as any).bindings[0].id = "22222222-2222-4222-8222-222222222222"; },
+      (x) => { (x.workerSettings as any).bindings.find((b: any) => b.name === "FACTORY_STORAGE_MODE").text = "probe-only"; },
+      (x) => { (x.workerSettings as any).bindings.find((b: any) => b.name === "FACTORY_ADMISSION_FENCE").text = "false"; },
       (x) => { x.admin.worlds[0].expires_at++; }, (x) => { x.admin.provenance = []; }, (x) => { x.admin.apiDatabaseId = "wrong"; }, (x) => { x.targetConfigSha256 = ""; },
     ];
     for (const mutate of mutations) { const changed = structuredClone(input); mutate(changed); await expect(verifyMigrationGate(changed)).rejects.toThrow(); }
@@ -296,5 +304,15 @@ test("SYNTHETIC bridge probe-only mode denies every world read/write/import even
     for (const op of ["getMany", "summaries", "put", "alias", "delete", "migrationSnapshot", "migrationImport"]) expect((await b.rpc({ op })).status).toBe(403);
     expect((await b.rpc({ op: "status" })).status).toBe(200);
     expect((await b.rpc({ op: "probe", action: "rollback", nonce: "5".repeat(32) })).status).toBe(200);
+  } finally { b.db.close(); }
+});
+
+test("SYNTHETIC an unrelated existing migration guard prevents every business/provenance import write", async () => {
+  const b = binding(), source = await migrationExport();
+  try {
+    b.db.query("INSERT INTO migration_guards VALUES(?,?,1)").run("unrelated-guard", "f".repeat(64));
+    expect((await b.rpc({ op: "migrationImport", export: source, identity: expectedIdentity })).status).toBe(503);
+    for (const table of ["worlds", "world_aliases", "storage_provenance"]) expect((b.db.query(`SELECT COUNT(*) n FROM ${table}`).get() as { n: number }).n).toBe(0);
+    expect((b.db.query("SELECT migration_id FROM migration_guards").get() as { migration_id: string }).migration_id).toBe("unrelated-guard");
   } finally { b.db.close(); }
 });

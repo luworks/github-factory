@@ -1,7 +1,7 @@
 import { Database } from "bun:sqlite";
-import { readFileSync, statSync, readlinkSync } from "node:fs";
+import { readFileSync, statSync, readlinkSync, realpathSync } from "node:fs";
 import { execFileSync } from "node:child_process";
-import { inspectSockets, requireFreshRetirementReceipt } from "./retirement-guard";
+import { assertOriginalLedger, inspectSockets, requireFreshRetirementReceipt } from "./retirement-guard";
 // Final read-only check immediately before restarting the exact retired app.
 if (import.meta.main) {
   try {
@@ -11,7 +11,12 @@ if (import.meta.main) {
       show("github-factory-tunnel.service", "ActiveState") !== "inactive" || show("github-factory-tunnel.service", "MainPID") !== "0" || readlinkSync(`/proc/${expected.pid}/cwd`) !== config.retiredRelease ||
       readFileSync(`/proc/${expected.pid}/stat`, "utf8").split(") ").at(-1)!.split(" ")[19] !== expected.startTicks || readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() !== expected.bootId ||
       readFileSync(`${config.retiredRelease}/SOURCE_SHA`, "utf8").trim() !== expected.sourceSha || new Bun.CryptoHasher("sha256").update(readFileSync(`${config.retiredRelease}/.env`)).digest("hex") !== expected.envSha256) throw new Error();
-    const stat = statSync(config.ledgerPath); if (stat.dev !== expected.ledgerDevice || stat.ino !== expected.ledgerInode) throw new Error();
+    const rawAuthority = readFileSync(config.authorityFile);
+    if (new Bun.CryptoHasher("sha256").update(rawAuthority).digest("hex") !== config.authoritySha256) throw new Error();
+    const original = JSON.parse(rawAuthority.toString()), receiptBytes = readFileSync(original.receiptPath);
+    if (new Bun.CryptoHasher("sha256").update(receiptBytes).digest("hex") !== original.receiptSha256) throw new Error();
+    const handoff = JSON.parse(receiptBytes.toString()); if (handoff.ledger !== original.ledgerPath || handoff.device !== original.device || handoff.inode !== original.inode) throw new Error();
+    const stat = statSync(config.ledgerPath); assertOriginalLedger(config.ledgerPath, original, { realpath: realpathSync(config.ledgerPath), device: stat.dev, inode: stat.ino }); if (stat.dev !== expected.ledgerDevice || stat.ino !== expected.ledgerInode) throw new Error();
     const db = new Database(config.ledgerPath, { readonly: true, strict: true }); db.exec("PRAGMA query_only=ON");
     let calls: { publicCalls: number; publicReserved: number; latestPublicAdmission: string | null };
     try { calls = db.query(`SELECT COUNT(*) publicCalls,COALESCE(SUM(CASE WHEN c.state='reserved' THEN 1 ELSE 0 END),0) publicReserved,MAX(h.admitted_at) latestPublicAdmission FROM ai_public_hourly h JOIN ai_calls c ON c.id=h.call_id`).get() as typeof calls; } finally { db.close(); }

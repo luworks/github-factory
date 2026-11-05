@@ -1,13 +1,13 @@
 import { Database } from "bun:sqlite";
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, readFileSync, statSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertIdentity, type StorageIdentity } from "../deploy/migration-contract";
-import { evaluateRetirement, inspectSockets, type RetirementIdentity, type RetirementState } from "./retirement-guard";
+import { evaluateRetirement, inspectSockets, assertOriginalLedger, type OriginalLedgerAuthority, type RetirementIdentity, type RetirementState } from "./retirement-guard";
 interface DrainConfig {
   identity: RetirementIdentity; retiredRelease: string; ledgerPath: string;
   cloudflareAccountId: string; cloudflareTokenFile: string; dedicatedTunnelId: string; connectorTokenFile: string;
-  storageSecretFile: string; storageIdentity: StorageIdentity; receiptPath: string; auditPath: string;
+  authorityFile: string; authoritySha256: string; storageSecretFile: string; storageIdentity: StorageIdentity; receiptPath: string; auditPath: string;
 }
 const show = (unit: string, property: string) => execFileSync("systemctl", ["--user", "show", unit, "-p", property, "--value"], { encoding: "utf8" }).trim();
 const nowMono = () => Number(readFileSync("/proc/uptime", "utf8").split(" ")[0]) * 1000;
@@ -18,6 +18,13 @@ const sha = (value: string) => new Bun.CryptoHasher("sha256").update(value).dige
  * never the retiring app or protected old service. It does NOT restart anything. */
 export async function drainRetiringRuntime(config: DrainConfig) {
   const expected = config.identity;
+  const authorityBytes = readFileSync(config.authorityFile);
+  if (new Bun.CryptoHasher("sha256").update(authorityBytes).digest("hex") !== config.authoritySha256) throw new Error("Original authority pin changed");
+  const original = JSON.parse(authorityBytes.toString()) as OriginalLedgerAuthority;
+  const authorityReceipt = readFileSync(original.receiptPath);
+  if (new Bun.CryptoHasher("sha256").update(authorityReceipt).digest("hex") !== original.receiptSha256) throw new Error("Original handoff receipt changed");
+  const handoff = JSON.parse(authorityReceipt.toString());
+  if (handoff.ledger !== original.ledgerPath || handoff.device !== original.device || handoff.inode !== original.inode) throw new Error("Original handoff identity mismatch");
   if (!Number.isInteger(expected.pid) || expected.pid <= 1 || expected.pid === expected.protectedPid || !config.retiredRelease.startsWith("/home/sn0admin/.local/share/github-factory/releases/") || !/^[a-f0-9-]{36}$/.test(config.dedicatedTunnelId)) throw new Error("Unknown retirement authority");
   const accountToken = readFileSync(config.cloudflareTokenFile, "utf8").trim();
   const cf = async (suffix: string) => {
@@ -38,7 +45,8 @@ export async function drainRetiringRuntime(config: DrainConfig) {
       procStart(expected.pid) !== expected.startTicks || readFileSync("/proc/sys/kernel/random/boot_id", "utf8").trim() !== expected.bootId ||
       show("moonshot-web.service", "MainPID") !== String(expected.protectedPid) || show("moonshot-web.service", "ActiveState") !== "active") throw new Error("Retiring or protected service identity changed");
     const ledger = statSync(config.ledgerPath);
-    if (ledger.dev !== expected.ledgerDevice || ledger.ino !== expected.ledgerInode) throw new Error("Original ledger identity changed");
+    assertOriginalLedger(config.ledgerPath, original, { realpath: realpathSync(config.ledgerPath), device: ledger.dev, inode: ledger.ino });
+    if (expected.ledgerDevice !== original.device || expected.ledgerInode !== original.inode || ledger.dev !== expected.ledgerDevice || ledger.ino !== expected.ledgerInode) throw new Error("Original ledger identity changed");
   };
   handles();
   if (!show("github-factory-tunnel.service", "ExecStart").includes(`--token-file ${config.connectorTokenFile}`)) throw new Error("Connector unit authority unknown");
