@@ -5,9 +5,12 @@ import { mock } from "bun:test";
 import { Database } from "bun:sqlite";
 import * as filesystem from "node:fs";
 import * as childProcess from "node:child_process";
+import chronology from "./deployment-chronology.json";
 import { liveAuthorityFixture, syntheticModule } from "./worker-authority";
 const kind = process.env.MOON_FACTORY_RETIREMENT_FIXTURE;
 if (!kind) throw new Error("Explicit SYNTHETIC subprocess required");
+const chronologyCase = kind.startsWith("chronology:") ? chronology.cases.find(c=>c.name===kind.slice(11)) : undefined;
+if(kind.startsWith("chronology:")&&!chronologyCase)throw new Error("Unknown chronology fixture");
 const fixture = liveAuthorityFixture({ kind: ["split", "physical-db"].includes(kind) ? kind : undefined });
 const hash = (s: string) => new Bun.CryptoHasher("sha256").update(s).digest("hex");
 const retiredRelease = "/home/sn0admin/.local/share/github-factory/releases/SYNTHETIC";
@@ -64,6 +67,7 @@ globalThis.fetch = (async (url: any, options: any) => {
     managementReads++;
     if (value.endsWith("/deployments")) {
       deploymentReads++;
+      if(chronologyCase)return Response.json({success:true,result:{deployments:chronologyCase.records}});
       if (kind === "before-stop-version" && deploymentReads >= 3) { const data = fixture.deployment(); data.deployments[0].versions[0].version_id = "66666666-6666-4666-8666-666666666666"; return Response.json({ success: true, result: data }); }
     }
     if (value.endsWith("/github-factory-gateway") && (kind === "during-drain-module" && stopCalls || kind === "final-module" && readyObserved)) return new Response(syntheticModule + "// drift", { headers: { "content-type": "application/javascript" } });
@@ -78,11 +82,11 @@ let rejection = "";
 try {
   const { drainRetiringRuntime } = await import("../../scripts/drain-retiring-runtime");
   await drainRetiringRuntime(config);
-  if (kind !== "valid") throw new Error("Invalid retirement passed");
+  if (kind !== "valid" && !chronologyCase?.expectedDeploymentId) throw new Error("Invalid retirement passed");
 } catch (error) {
-  if (kind === "valid") throw error;
+  if (kind === "valid" || chronologyCase?.expectedDeploymentId) throw error;
   rejection = (error as Error).message;
-  const expected = kind === "split" ? /single known 100%/ : kind === "physical-db" ? /physical Worker binding/ : kind === "before-stop-version" ? /deployment\/version changed/ : /Actual Worker module changed/;
+  const expected = chronologyCase ? /chronology|timezone/ : kind === "split" ? /single known 100%/ : kind === "physical-db" ? /physical Worker binding/ : kind === "before-stop-version" ? /deployment\/version changed/ : /Actual Worker module changed/;
   if (!expected.test(rejection)) throw error;
 }
 filesystem.rmSync(fixtureDir, { recursive: true, force: true });
