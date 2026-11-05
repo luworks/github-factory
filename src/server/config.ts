@@ -19,6 +19,7 @@ export function projectEnv(): Record<string, string> {
 }
 
 export function getConfig(env: Record<string, string> = projectEnv()) {
+  if (env.MOONSHOT_WORLD_STORE && !["sqlite", "d1"].includes(env.MOONSHOT_WORLD_STORE)) throw new Error("Invalid world storage configuration");
   const publicRuntime = Boolean(env.MOONSHOT_PUBLIC_ORIGIN);
   const budgetUsd = Math.max(0, Math.min(50, Number(env.MOONSHOT_BUDGET_USD || 0) || 0));
   // Public analysis uses a fixed Meta deployment. Provider/model/endpoint are
@@ -36,6 +37,9 @@ export function getConfig(env: Record<string, string> = projectEnv()) {
     publicOrigin: env.MOONSHOT_PUBLIC_ORIGIN || "",
     githubRequestsPerHour: Math.max(0, Math.min(1000, Math.floor(Number(env.MOONSHOT_GITHUB_REQUESTS_PER_HOUR ?? 45) || 0))),
     dataDir: resolve(env.MOONSHOT_DATA_DIR || ".data"),
+    worldStore: env.MOONSHOT_WORLD_STORE === "d1" ? "d1" : "sqlite",
+    d1StorageUrl: env.MOONSHOT_D1_STORAGE_URL || "",
+    d1StorageSecret: env.MOONSHOT_D1_STORAGE_SECRET || "",
     // An explicit existing file is required; BudgetLedger never initializes a
     // new file at this path, so migration cannot silently fork paid history.
     ledgerPath: env.MOONSHOT_BUDGET_LEDGER_PATH || undefined,

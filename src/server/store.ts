@@ -3,12 +3,9 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { WorldSnapshot } from "../contracts";
 import { parseRepo } from "./github";
+import type { CachedWorld, WorldSummary, WorldStorageStatus } from "./world-storage";
+export type { CachedWorld } from "./world-storage";
 
-export interface CachedWorld {
-  world: WorldSnapshot;
-  expiresAt: number;
-  fresh: boolean;
-}
 /** Independent SQLite file; a complete snapshot is replaced atomically in a single statement. */
 export class WorldStore {
   private db: Database;
@@ -45,6 +42,14 @@ export class WorldStore {
       this.delete(repo);
       return null;
     }
+  }
+  summaries(repos: string[]): WorldSummary[] {
+    return repos.flatMap((key) => { const entry = this.get(key); return entry ? [{ key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt }] : []; });
+  }
+  status(): WorldStorageStatus {
+    const worlds = this.db.query("SELECT COUNT(*) count FROM worlds").get() as { count: number };
+    const aliases = this.db.query("SELECT COUNT(*) count FROM world_aliases").get() as { count: number };
+    return { backend: "sqlite", authoritative: true, schemaVersion: 1, worlds: worlds.count, aliases: aliases.count };
   }
   put(world: WorldSnapshot, ttlMs = 90_000, now = Date.now()): void {
     const expiry = now + Math.max(60_000, Math.min(120_000, ttlMs));

@@ -7,15 +7,12 @@ import { WorldStore, worldStorePath } from "./store";
 import { PublicGitHubQuota } from "./public-quota";
 import { join } from "node:path";
 import { requireOpenSourceLicense } from "./open-source";
+import { D1WorldStore } from "./d1-store";
+import type { CachedWorld, SnapshotStore, WorldStorageStatus } from "./world-storage";
+import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
 
 interface Collector {
   collect(ref: RepoRef): Promise<RepoCollection>;
-}
-interface SnapshotStore {
-  delete?(repo: string): void;
-  alias?(input: string, canonical: string): void;
-  get(repo: string, now?: number): ReturnType<WorldStore["get"]>;
-  put(world: WorldSnapshot, ttlMs?: number, now?: number): void;
 }
 
 /** Injectable service factory keeps tests deterministic and prevents all network access on import. */
@@ -42,9 +39,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
       : (error as { code?: string })?.code === "IP_RATE_LIMIT"
         ? new GitHubError("IP_RATE_LIMIT", 429, (error as Error).message, (error as { retryAfter?: number }).retryAfter)
       : new GitHubError("WORLD_UNAVAILABLE", 503, "Repository analysis is temporarily unavailable.");
-  const getCachedWorld = (input: string): WorldSnapshot | null => {
-    const ref = parseRepo(input);
-    const entry = options.store.get(ref.fullName, now());
+  const cachedSnapshot = (entry: CachedWorld | null): WorldSnapshot | null => {
     if (!entry) return null;
     requireOpenSourceLicense(entry.world.repo.license);
     return entry.fresh
@@ -60,17 +55,22 @@ export function createWorldService(options: { collector: Collector; store: Snaps
           },
         };
   };
+  const getCachedWorld = async (input: string): Promise<WorldSnapshot | null> => {
+    const ref = parseRepo(input);
+    return cachedSnapshot(await options.store.get(ref.fullName, now()));
+  };
   const loadWorld = async (input: string, settings?: { refresh?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
     const ref = parseRepo(input),
       key = ref.fullName.toLowerCase();
-    const cached = options.store.get(key, now());
+    const cached = await options.store.get(key, now());
     if (cached) requireOpenSourceLicense(cached.world.repo.license);
     // Navigation is cache-first, including historical snapshots. It must never
     // wait on GitHub, consume collection allowance, or start background work.
-    if (cached && !settings?.refresh) return getCachedWorld(input)!;
+    if (cached && !settings?.refresh) return cachedSnapshot(cached)!;
     if (inflight.has(key)) return inflight.get(key)!;
     // Forced refresh cannot turn one browser into an unbounded GitHub request loop.
     if (cached && settings?.refresh && now() - Date.parse(cached.world.collectedAt) < 15_000) return cached.world;
+    requireAnalysisOpen();
     const failure = cooldown.get(key);
     if (failure && failure.until > now()) {
       if (cached) return stale(cached.world, failure.error);
@@ -93,18 +93,19 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         const world = analyzeCollection(collected);
         const expiresAt = now() + 90_000;
         world.refreshAfter = expiresAt;
-        options.store.put(world, 90_000, now());
-        options.store.alias?.(key, world.repo.fullName);
+        await options.store.put(world, 90_000, now());
+        await options.store.alias?.(key, world.repo.fullName);
         cooldown.set(key, {
           until: now() + 15_000,
           error: new GitHubError("REFRESH_COOLDOWN", 429, "Wait briefly before refreshing.", 15),
         });
         return world;
       } catch (error) {
+        if ((error as { code?: string })?.code === "WORLD_STORAGE_UNAVAILABLE") throw error;
         const typed = asError(error);
         cooldown.set(key, { until: now() + Math.max(15, Math.min(3600, typed.retryAfter || 15)) * 1000, error: typed });
         if (typed.code === "PUBLIC_ONLY" || typed.code === "OPEN_SOURCE_REQUIRED") {
-          options.store.delete?.(key);
+          await options.store.delete?.(key);
           throw typed;
         }
         if (cached) return stale(cached.world, typed);
@@ -121,21 +122,27 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     inflight.set(key, promise);
     return promise;
   };
-  const listFeatured = async (): Promise<FeaturedProject[]> =>
-    CURATED_PROJECTS.map((project) => {
-      const cached = options.store.get(project.fullName, now());
-      return cached && (() => { try { requireOpenSourceLicense(cached.world.repo.license); return true; } catch { return false; } })()
+  const listFeatured = async (): Promise<FeaturedProject[]> => {
+    const keys = CURATED_PROJECTS.map((project) => project.fullName.toLowerCase());
+    const summaries = options.store.summaries ? await options.store.summaries(keys) :
+      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now()); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt } : null; }))).filter((row) => row !== null);
+    const byKey = new Map(summaries.map((row) => [row.key, row]));
+    return CURATED_PROJECTS.map((project) => {
+      const cached = byKey.get(project.fullName.toLowerCase());
+      return cached && (() => { try { requireOpenSourceLicense(cached.repo.license); return true; } catch { return false; } })()
         ? {
             ...project,
-            description: cached.world.repo.description || project.description,
-            language: cached.world.repo.language,
-            stars: cached.world.repo.stars,
+            description: cached.repo.description || project.description,
+            language: cached.repo.language,
+            stars: cached.repo.stars,
             ready: true,
-            collectedAt: cached.world.collectedAt,
+            collectedAt: cached.collectedAt,
           }
         : { ...project };
     });
-  return { loadWorld, listFeatured, getCachedWorld };
+  };
+  const storageStatus = async (): Promise<WorldStorageStatus | { backend: "injected" }> => options.store.status ? options.store.status() : { backend: "injected" };
+  return { loadWorld, listFeatured, getCachedWorld, storageStatus, activeCollections: () => active };
 }
 let singleton: ReturnType<typeof createWorldService> | undefined;
 function service() {
@@ -143,7 +150,7 @@ function service() {
     const config = getConfig();
     singleton = createWorldService({
       collector: new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch)),
-      store: new WorldStore(worldStorePath(config.dataDir)),
+      store: config.worldStore === "d1" ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret }) : new WorldStore(worldStorePath(config.dataDir)),
     });
   }
   return singleton;
@@ -158,4 +165,5 @@ export const listFeatured = (): Promise<FeaturedProject[]> => service().listFeat
 /** Cache-only read: no GitHub or paid requests; null on a miss, STALE note on expiry.
  * This reads the backend snapshot, whose blueprint is rules-generated. Parent integration
  * overlays its independently cached successful AI blueprint for the exact repository/head. */
-export const getCachedWorld = (input: string): WorldSnapshot | null => service().getCachedWorld(input);
+export const getCachedWorld = (input: string): Promise<WorldSnapshot | null> => service().getCachedWorld(input);
+export const getWorldStorageState = async () => ({ ...(await service().storageStatus()), writesHeld: migrationHeld(), activeCollections: service().activeCollections(), activePublicAnalyses: activePublicAnalyses() });

@@ -265,6 +265,7 @@ describe("service freshness and concurrency", () => {
       expect(cached.headSha).toBe(old.headSha); expect(cached.collectedAt).toBe(old.collectedAt);
       expect(cached.coverage.notes.join(" ")).toContain("STALE");
       const refresh = service.loadWorld("example/project", { refresh: true, admit });
+      await Promise.resolve();
       expect(calls).toBe(1); expect(admissions).toBe(1);
       // A slow explicit refresh must not block another navigation to real cached facts.
       expect((await service.loadWorld("example/project", { admit })).headSha).toBe(old.headSha);
@@ -292,13 +293,14 @@ describe("service freshness and concurrency", () => {
     try {
       const a = service.loadWorld("example/project"),
         b = service.loadWorld("EXAMPLE/PROJECT");
+      await Promise.resolve();
       expect(calls).toBe(1);
       release(monorepo());
       expect((await a).headSha).toBe((await b).headSha);
       await service.loadWorld("example/project");
       await service.loadWorld("example/project", { refresh: true });
       expect(calls).toBe(1);
-      expect(service.getCachedWorld("example/project")?.blueprint.generator.provider).toBe("rules");
+      expect((await service.getCachedWorld("example/project"))?.blueprint.generator.provider).toBe("rules");
       expect(calls).toBe(1);
     } finally {
       store.close();
@@ -347,7 +349,7 @@ describe("service freshness and concurrency", () => {
     });
     try {
       await expect(service.loadWorld("example/project", { refresh: true })).rejects.toMatchObject({ code: "PUBLIC_ONLY", status: 403 });
-      expect(service.getCachedWorld("example/project")).toBeNull();
+      expect(await service.getCachedWorld("example/project")).toBeNull();
     } finally {
       store.close();
     }
@@ -458,9 +460,9 @@ describe("service freshness and concurrency", () => {
         collectedAt: null,
         language: null,
       });
-      expect(service.getCachedWorld("react/react")?.coverage.notes.join(" ")).toContain("STALE");
-      expect(service.getCachedWorld("react/react")?.repo.fullName).toBe("facebook/react");
-      expect(service.getCachedWorld("facebook/react")?.repo.fullName).toBe("facebook/react");
+      expect((await service.getCachedWorld("react/react"))?.coverage.notes.join(" ")).toContain("STALE");
+      expect((await service.getCachedWorld("react/react"))?.repo.fullName).toBe("facebook/react");
+      expect((await service.getCachedWorld("facebook/react"))?.repo.fullName).toBe("facebook/react");
       expect(calls).toBe(0);
     } finally {
       store.close();

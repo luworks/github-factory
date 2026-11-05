@@ -1,7 +1,8 @@
+import { worldStorageRpc, type StorageEnvironment } from "./d1-storage";
 /** Independent path Worker. A prefix route also catches bare-path query strings.
  * No company-site bundle, credentials, SQLite or model code is included. */
 export default {
-  async fetch(request: Request, env: { FACTORY_ORIGIN: string; FACTORY_GATEWAY_SECRET?: string; COMPANY_SITE?: { fetch(request: Request): Promise<Response> } }): Promise<Response> {
+  async fetch(request: Request, env: StorageEnvironment & { FACTORY_ORIGIN: string; FACTORY_GATEWAY_SECRET?: string; COMPANY_SITE?: { fetch(request: Request): Promise<Response> } }): Promise<Response> {
     const publicUrl = new URL(request.url);
     if (publicUrl.hostname !== "chaorders.com")
       return new Response("Not found", { status: 404 });
@@ -10,6 +11,7 @@ export default {
     // transparent service binding for adjacent company paths, never recursion.
     if (!(publicUrl.pathname === "/github-factory" || publicUrl.pathname.startsWith("/github-factory/")))
       return env.COMPANY_SITE?.fetch(request) ?? new Response("Not found", { status: 404 });
+    if (publicUrl.pathname === "/github-factory/_storage") return worldStorageRpc(request, env);
     if (!["GET", "HEAD", "POST"].includes(request.method))
       return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD, POST" } });
     if (publicUrl.pathname === "/github-factory") {

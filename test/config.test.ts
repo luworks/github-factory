@@ -8,3 +8,10 @@ test("public deployment pins Meta model/endpoint and caps hourly accounting with
   expect(getConfig({}).budgetUsd).toBe(0);
   expect(getConfig({}).apiKey).toBe("");
 });
+
+test("world storage selection fails closed for unknown backends and keeps budget authority independent", () => {
+  expect(getConfig({}).worldStore).toBe("sqlite");
+  const config = getConfig({ MOONSHOT_WORLD_STORE: "d1", MOONSHOT_BUDGET_LEDGER_PATH: "/synthetic/existing-ledger.sqlite" });
+  expect(config.worldStore).toBe("d1"); expect(config.ledgerPath).toBe("/synthetic/existing-ledger.sqlite"); expect(config.budgetUsd).toBe(0);
+  expect(() => getConfig({ MOONSHOT_WORLD_STORE: "typo" })).toThrow("Invalid world storage configuration");
+});

@@ -13,9 +13,11 @@ export const Route = createFileRoute("/api/worlds")({
           const { loadWorld } = await import("../server/service");
           let w = await loadWorld(repo, { admit: access.admitCollection });
           if (body.enrich === true) {
+            const { publicAnalysis, requireAnalysisOpen } = await import("../server/runtime-activity");
+            requireAnalysisOpen();
             access.admitAi();
             const { enrichWorld } = await import("../server/ai");
-            w = await enrichWorld(w);
+            w = await publicAnalysis(() => enrichWorld(w));
           }
           return json(w);
         } catch (e) {

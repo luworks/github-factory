@@ -35,7 +35,7 @@ bun run test:browser
 
 The app reads bounded public GitHub metadata, paths and manifests. It never clones or executes an input repository. Untrusted repository text cannot become instructions. Architecture inference, observed source facts and unknown states stay distinct; moving particles illustrate relationships, not measured traffic. Each world carries its head, timestamp, source links and coverage. Refreshes do not regenerate paid guides.
 
-Server SQLite stores the cache and spending reservations. Production requires a persistent Bun host. The existing Cloudflare Workers site alone cannot execute `bun:sqlite`; the documented gateway forwards only `/github-factory` to an independently hosted app.
+Local development uses SQLite for world snapshots. Production can make Cloudflare D1 authoritative for public snapshots and aliases through a private fixed-operation Worker bridge. Spending reservations, cached model guides and admission quotas remain on the persistent Bun host in their existing SQLite files. The company Worker cannot execute `bun:sqlite`; the gateway forwards the product application to that host. See [deployment and migration controls](docs/DEPLOYMENT.md#authoritative-d1-world-storage).
 
 The `docs/` directory retains sanitized, dated development reports. Their historical tests, costs and local delivery statements are not current production evidence. [SETUP.md](docs/SETUP.md) records this repository's checks. The code for the English three-minute film is in `media/film`; generated speech and the finished film are private artifacts and are not part of this MIT source release.
 

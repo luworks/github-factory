@@ -40,3 +40,7 @@ export function readRepositoryPreview(input: string, getCached: (input: string) 
   parseRepo(input);
   return projectRepositoryPreview(input, getCached(input), now);
 }
+export async function readRepositoryPreviewAsync(input: string, getCached: (input: string) => Promise<WorldSnapshot | null>, now = Date.now()) {
+  parseRepo(input);
+  return projectRepositoryPreview(input, await getCached(input), now);
+}

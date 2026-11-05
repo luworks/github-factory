@@ -12,6 +12,8 @@ export const Route = createFileRoute("/api/health")({
         const { readFile } = await import("node:fs/promises");
         const stamp = await readFile("SOURCE_SHA", "utf8").catch(() => "");
         const sourceSha = /^[a-f0-9]{40}$/.test(stamp.trim()) ? stamp.trim() : null;
+        const { getWorldStorageState } = await import("../server/service");
+        const worldStorage = await getWorldStorageState();
         return Response.json(
           {
             app: "moonshot",
@@ -23,6 +25,7 @@ export const Route = createFileRoute("/api/health")({
             configured: Boolean(c.apiKey),
             githubConfigured: Boolean(c.githubToken),
             readOnly: true,
+            worldStorage,
             at: new Date().toISOString(),
           },
           { headers: { "cache-control": "no-store" } },

@@ -104,7 +104,7 @@ test("unknown license in a previously saved world cannot bypass collection gatin
   const service = createWorldService({ store, collector: { async collect() { calls++; throw new Error("must not collect"); } } });
   try {
     await expect(service.loadWorld(world.repo.fullName)).rejects.toMatchObject({ code: "OPEN_SOURCE_REQUIRED" });
-    expect(() => service.getCachedWorld(world.repo.fullName)).toThrow("open-source");
+    await expect(service.getCachedWorld(world.repo.fullName)).rejects.toThrow("open-source");
     expect(calls).toBe(0);
   } finally { store.close(); }
 });
