@@ -15,17 +15,23 @@ export interface Palette {
   muted: string;
   glow: string;
 }
+/** Shared neutral map chrome; matches the --geist-map-* CSS tokens. */
+export const MAP_CONTRAST = {
+  bg: "#202020", surface: "#171717", text: "#fafafa", muted: "#a1a1a1",
+  border: "#737373", focus: "#52a8ff", labelPlate: "#171717", labelText: "#fafafa",
+  labelSelectedPlate: "#ffffff", labelSelectedText: "#171717", labelSelectedBorder: "#0068d6", edge: "#d4d4d4",
+} as const;
 export const PALETTES: Record<StyleId, Palette> = {
   moonshot: {
-    sky: "#111e2c",
-    ground: "#293b4e",
-    grid: "#526576",
-    edge: "#93aead",
+    sky: "#111111",
+    ground: "#202020",
+    grid: "#525252",
+    edge: "#d4d4d4",
     wall: "#b2c8bf",
     roof: "#e0e4d2",
     trim: "#efb17c",
-    text: "#edf5e6",
-    muted: "#99afba",
+    text: "#fafafa",
+    muted: "#a1a1a1",
     glow: "#b9e9e2",
   },
   factorio: {
@@ -92,8 +98,7 @@ function connectionPath(g: Pen, a: PlacedNode, b: PlacedNode, style: StyleId) {
   }
 }
 export function paintConnections(g: Pen, nodes: PlacedNode[], edges: WorldEdge[], style: StyleId, _t: number, _animate: boolean) {
-  const byId = new Map(nodes.map((n) => [n.node.id, n])),
-    p = PALETTES[style];
+  const byId = new Map(nodes.map((n) => [n.node.id, n]));
   g.save();
   g.lineJoin = "round";
   g.lineCap = "round";
@@ -102,19 +107,19 @@ export function paintConnections(g: Pen, nodes: PlacedNode[], edges: WorldEdge[]
       b = byId.get(e.target);
     if (!a || !b) continue;
     connectionPath(g, a, b, style);
-    g.strokeStyle = style === "moonshot" ? "#1a2938" : style === "factorio" ? "#29332d" : style === "civilization" ? "#8e8e66" : "#536648";
-    g.lineWidth = style === "factorio" ? 13 : style === "civilization" ? 7 : 11;
-    g.globalAlpha = 0.8;
+    g.strokeStyle = MAP_CONTRAST.surface;
+    g.lineWidth = style === "factorio" ? 13 : style === "civilization" ? 9 : 11;
+    g.globalAlpha = 1;
     g.stroke();
     if (e.confidence === "inferred") g.setLineDash([5, 7]);
-    g.strokeStyle = p.edge;
+    g.strokeStyle = MAP_CONTRAST.edge;
     g.lineWidth = style === "factorio" ? 8 : style === "civilization" ? 3 : 7;
-    g.globalAlpha = 0.62;
+    g.globalAlpha = 1;
     g.stroke();
-    g.setLineDash(style === "factorio" ? [2, 7] : [8, 12]);
-    g.lineWidth = style === "factorio" ? 5 : 1;
+    g.setLineDash(e.confidence === "inferred" ? [5, 7] : style === "factorio" ? [2, 7] : [8, 12]);
+    g.lineWidth = 1;
     g.strokeStyle = style === "factorio" ? "#d3a84f" : "#e5e3bf";
-    g.globalAlpha = 0.5;
+    g.globalAlpha = 1;
     g.stroke();
     g.setLineDash([]);
   }
@@ -127,11 +132,18 @@ export function paintBuilding(g: Pen, pn: PlacedNode, style: StyleId, selected: 
   g.translate(pn.x, pn.y);
   ellipse(g, 17, 14, 69, 25, "#10252745");
   if (selected || hover) {
+    const transform = g.getTransform();
+    const pixelRatio = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);
+    const screenScale = Math.max(0.01, Math.hypot(transform.a, transform.b) / pixelRatio);
+    const outlineWidth = Math.max(selected ? 3 : 2, 2 / screenScale);
     ellipse(g, 0, 4, 79, 35, selected ? `${p.trim}28` : "#f4f6df18");
     g.beginPath();
     g.ellipse(0, 4, 79, 35, 0, 0, Math.PI * 2);
-    g.strokeStyle = selected ? p.trim : p.text;
-    g.lineWidth = selected ? 2.5 : 1;
+    g.strokeStyle = MAP_CONTRAST.surface;
+    g.lineWidth = outlineWidth + Math.max(3, 4 / screenScale);
+    g.stroke();
+    g.strokeStyle = selected ? MAP_CONTRAST.focus : MAP_CONTRAST.text;
+    g.lineWidth = outlineWidth;
     g.stroke();
     for (const x of [-77, 77])
       line(
@@ -141,7 +153,7 @@ export function paintBuilding(g: Pen, pn: PlacedNode, style: StyleId, selected: 
           [x, 14],
           [x - Math.sign(x) * 11, 19],
         ],
-        p.trim,
+        selected ? MAP_CONTRAST.focus : MAP_CONTRAST.text,
         2,
       );
   }
@@ -152,9 +164,9 @@ export function paintBuilding(g: Pen, pn: PlacedNode, style: StyleId, selected: 
   g.restore();
 }
 /** Labels are painted last in screen space, so roofs and vignette never obscure them. */
-function labelMetrics(g: Pen, pn: PlacedNode, selected: boolean, scale: number) {
-  const maxWidth = Math.max(42, Math.min(146, 157 * scale));
-  g.font = `${selected ? 600 : 500} ${Math.max(10, Math.min(12, 12 * scale))}px "IBM Plex Mono",monospace`;
+function labelMetrics(g: Pen, pn: PlacedNode, selected: boolean, _scale: number) {
+  const maxWidth = selected ? 260 : 180;
+  g.font = `${selected ? 600 : 500} 13px "IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace`;
   let label = pn.node.label;
   if (g.measureText(label).width > maxWidth) {
     while (label.length > 1 && g.measureText(label + "…").width > maxWidth) label = label.slice(0, -1);
@@ -163,20 +175,19 @@ function labelMetrics(g: Pen, pn: PlacedNode, selected: boolean, scale: number) 
   return { label, width: g.measureText(label).width + 16 };
 }
 export function paintLabel(g: Pen, pn: PlacedNode, style: StyleId, selected: boolean, x: number, y: number, scale: number) {
-  const p = PALETTES[style];
   g.save();
   const { label, width } = labelMetrics(g, pn, selected, scale);
-  g.fillStyle = selected ? "#f6ebcf" : "#14272be8";
+  g.fillStyle = selected ? MAP_CONTRAST.labelSelectedPlate : MAP_CONTRAST.labelPlate;
   g.beginPath();
-  g.roundRect(x - width / 2, y, width, 22, 3);
+  g.roundRect(x - width / 2, y, width, 28, 3);
   g.fill();
-  g.strokeStyle = selected ? p.trim : "#b9c7a82b";
-  g.lineWidth = 1;
+  g.strokeStyle = selected ? MAP_CONTRAST.labelSelectedBorder : MAP_CONTRAST.border;
+  g.lineWidth = selected ? 2 : 1;
   g.stroke();
-  g.fillStyle = selected ? "#263d3d" : p.text;
+  g.fillStyle = selected ? MAP_CONTRAST.labelSelectedText : MAP_CONTRAST.labelText;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(label, x, y + 11);
+  g.fillText(label, x, y + 14);
   g.restore();
 }
 export function paintLabels(
@@ -194,7 +205,7 @@ export function paintLabels(
   const { x, y, k } = camera;
   const labels = nodes.map((p) => {
     const { width } = labelMetrics(g, p, p.node.id === selectedId, k);
-    return { id: p.node.id, x: p.x * k + x - width / 2, y: (p.y + 34) * k + y, width, height: 22 };
+    return { id: p.node.id, x: p.x * k + x - width / 2, y: (p.y + 34) * k + y, width, height: 28 };
   });
   const visible = new Set(declutterLabels(labels, [selectedId, hoverId]).map((r) => r.id));
   for (const p of nodes) if (visible.has(p.node.id)) paintLabel(g, p, style, p.node.id === selectedId, p.x * k + x, (p.y + 34) * k + y, k);

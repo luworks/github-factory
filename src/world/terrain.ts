@@ -14,7 +14,7 @@ export function terrain(g: Pen, style: StyleId, nodes: PlacedNode[], seed: strin
   g.fillStyle = ground;
   g.fillRect(-1800, -1300, 3600, 2600);
   const light = g.createRadialGradient(cx - 160, cy - 200, 60, cx, cy, Math.max(b.width, b.height));
-  light.addColorStop(0, lunar ? "#405365" : civ ? "#e7d7a666" : factory ? "#a1946944" : "#9eaf7155");
+  light.addColorStop(0, lunar ? "#303030" : civ ? "#e7d7a666" : factory ? "#a1946944" : "#9eaf7155");
   light.addColorStop(1, "#162a2b00");
   g.fillStyle = light;
   g.fillRect(-1800, -1300, 3600, 2600);
@@ -23,7 +23,7 @@ export function terrain(g: Pen, style: StyleId, nodes: PlacedNode[], seed: strin
     const z = hash(seed + ":grain:" + i),
       x = (z % 3200) - 1600,
       y = (hash(seed + ":gy:" + i) % 2200) - 1100;
-    g.fillStyle = i % 3 === 0 ? (lunar ? "#a1b8c314" : "#e4dfaa14") : lunar ? "#0b172628" : "#283c2920";
+    g.fillStyle = i % 3 === 0 ? (lunar ? "#ffffff14" : "#e4dfaa14") : lunar ? "#00000028" : "#283c2920";
     g.fillRect(x, y, 1 + (z % 4), 1 + (z % 2));
   }
   if (civ) {
@@ -148,8 +148,8 @@ export function terrain(g: Pen, style: StyleId, nodes: PlacedNode[], seed: strin
       if (!clearOfNodes(nodes, x, y, 115)) continue;
       if (lunar) {
         const r = 5 + (z % 32);
-        ellipse(g, x + 3, y + 3, r, r * 0.45, "#192a3c", "#51627188");
-        ellipse(g, x, y - 1, r * 0.8, r * 0.3, "#2b3c50");
+        ellipse(g, x + 3, y + 3, r, r * 0.45, "#171717", "#73737388");
+        ellipse(g, x, y - 1, r * 0.8, r * 0.3, "#262626");
         if (z % 4 === 0)
           line(
             g,

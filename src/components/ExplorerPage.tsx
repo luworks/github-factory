@@ -37,6 +37,10 @@ import { WorldCanvas } from "../world/WorldCanvas";
 import { STYLES } from "../client/demo";
 import { clock, enrichWorld, getBudget, getWorld, refreshWorld, shortNumber } from "../client/api";
 import { Brand, External } from "./shared";
+/** Keep source text intact while offering natural identifier wrapping points. */
+function identifierBreaks(value: string) {
+  return value.split(/(?<=[/@_.-])/u).map((part, i) => <span key={i}>{part}<wbr /></span>);
+}
 function sourceUrl(world: WorldSnapshot, path: string) {
   return `${world.repo.url}/tree/${encodeURIComponent(world.headSha)}/${path.split("/").map(encodeURIComponent).join("/")}`;
 }
@@ -217,7 +221,7 @@ export function ExplorerPage({
       ) : (
         <>
           <div className="world-topline">
-            <div className={`world-signal ${stale ? "stale" : ""}`}>
+            <div className={`world-signal ${world.source === "demo" ? "demo" : stale ? "stale" : world.health.github === "error" ? "error" : world.health.github === "partial" ? "partial" : "connected"}`}>
               <span className="signal-dot" />
               {world.source === "demo"
                 ? "ILLUSTRATION"
@@ -283,8 +287,8 @@ export function ExplorerPage({
                       {n.kind === "data" ? "◫" : n.kind === "infra" ? "⌁" : n.kind === "app" ? "▣" : n.kind === "service" ? "⬡" : "◇"}
                     </span>
                     <span>
-                      <strong>{n.label}</strong>
-                      <small>{n.kind}</small>
+                      <strong title={n.label}>{n.label}</strong>
+                      <small>{n.kind} · {n.status}</small>
                     </span>
                     <span className={`node-status status-${n.status}`} title={n.status} />
                     <ChevronRight size={12} />
@@ -548,7 +552,7 @@ export function ExplorerPage({
                         ? "SOURCE OBSERVED"
                         : "STRUCTURE INFERRED"}
                     </div>
-                    <h2>{selected.label}</h2>
+                    <h2>{identifierBreaks(selected.label)}</h2>
                     <code className="path-label">{selected.path || "/"}</code>
                     <p>{world.blueprint.districts.find((d) => d.nodeId === selected.id)?.purpose || selected.description}</p>
                     <dl className="node-facts">
@@ -569,7 +573,7 @@ export function ExplorerPage({
                     {selected.evidence.map((e, i) => (
                       <External key={i} href={e.startsWith("https:") ? e : sourceUrl(world, e)} className="evidence-link">
                         <FileCode2 size={12} />
-                        {e.startsWith("https:") ? new URL(e).pathname.split("/").slice(4).join("/") || "Repository" : e}
+                        <span className="evidence-link-text">{e.startsWith("https:") ? new URL(e).pathname.split("/").slice(4).join("/") || "Repository" : e}</span>
                       </External>
                     ))}
                     <External className="view-source-button" href={sourceUrl(world, selected.path)}>
@@ -584,7 +588,7 @@ export function ExplorerPage({
                         return n ? (
                           <button className="connected-node" key={e.id} onClick={() => select(id)}>
                             <span>
-                              <strong>{n.label}</strong>
+                              <strong title={n.label}>{n.label}</strong>
                               <small>
                                 {e.label} · {e.confidence}
                               </small>
