@@ -30,15 +30,15 @@ Prepared for manual review on 2026-11-04. This file is a draft, not a submission
 
 ## Project Description
 
-The following 208-word draft assumes the final URL-only/open-source gate and abuse controls have passed integration checks. It describes verified development use of Meta without claiming that the current public provider is enabled.
+The following 208-word draft assumes the final URL-only/public-repository gate and abuse controls have passed integration checks. It describes verified development use of Meta without claiming that the current public provider is enabled.
 
 > Moon Factory helps developers find their place in unfamiliar open-source projects. Instead of starting with a flat file tree and disconnected dashboards, visitors paste a GitHub repository URL and explore a source-linked world: directories become districts, declared dependencies become relationships, and recent issues, pull requests, commits and workflow runs stay attached to their original records.
 >
-> The same repository can be explored through five original procedural visual styles, with English and Chinese interfaces. A district inspector shows captured paths, evidence links, timestamps and coverage. Observed facts, inferred roles and unknown states remain distinct. Animation illustrates the map; it does not pretend to measure runtime traffic.
+> The same repository can be explored through five original procedural visual styles, with English-only interfaces. A district inspector shows captured paths, evidence links, timestamps and coverage. Observed facts, inferred roles and unknown states remain distinct. Animation illustrates the map; it does not pretend to measure runtime traffic.
 >
 > During development, we used Meta Model API to build the optional field-guide layer, turning a bounded repository survey into structured explanations and evidence-linked contribution suggestions. Responses must satisfy a strict schema and reference existing districts and sources; trusted components render them without executing generated code.
 >
-> The product is built with TanStack Start, React, Bun and persistent SQLite, and is published as an independent MIT repository. The public workflow is read-only and restricted to open-source GitHub analysis. It never clones or executes an input repository or exposes a general programming prompt. Explicit analysis, persisted budgets, bounded requests and public abuse controls keep the experience focused.
+> The product is built with TanStack Start, React, Bun and persistent SQLite, and is published as an independent MIT repository. The public workflow is read-only and restricted to public GitHub repository analysis. It never clones or executes an input repository or exposes a general programming prompt. Explicit analysis, persisted budgets, bounded requests and public abuse controls keep the experience focused.
 
 ## Describe your use of Meta products to build the submitted project
 
@@ -74,7 +74,7 @@ Do not claim use, credits or partnerships that were not verified.
 ## Final handoff checks
 
 - Confirm the final public URL, repository head, deployed source identity and latest check results independently.
-- Confirm that public intake accepts only the intended GitHub URL/schema and that unknown or non-open-source licenses fail closed. Do not describe an unverified control as delivered.
+- Confirm that public intake accepts only the intended GitHub URL/schema and that license is retained as metadata and private/unknown-visibility repositories fail closed. Do not describe an unverified control as delivered.
 - Confirm per-IP enforcement through the trusted gateway, including forged-header rejection; retain exact configured limits in the deployment record.
 - Select the correct Meta-runtime disclosure and retain all call deltas, failures and reservations. Never reset or fork the active paid ledger to make a new demo.
 - Use the new film recorded from the real public website, showing cached capture times and actual unknown/partial states where present. Do not relabel historical footage or synthesize missing CI/provider evidence.

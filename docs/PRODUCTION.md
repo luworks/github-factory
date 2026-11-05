@@ -2,11 +2,13 @@
 
 Public URL: **https://chaorders.com/github-factory/**. The bare path redirects to the trailing slash and preserves query parameters. The company site continues to serve its own homepage and `/api/health`.
 
-## Final Moon Factory release candidate
+## Current candidate and historical evidence
 
-The final public candidate is branded **Moon Factory**, with stable repository/URL. It includes nineteen editorial catalog entries: fifteen real historical cached worlds are admitted by the captured open-source license; four entries remain without an admitted preview. The custom-licensed Llama entry is removed. These maps retain their original heads, capture timestamps and stale expiry; none is claimed as a fresh collection. Gallery preview endpoints are cache-only and create no upstream or model calls.
+The current candidate uses an English-only UI and accepts any publicly accessible GitHub repository. License metadata is displayed as reported, including null/NOASSERTION/custom values; it is not an admission gate. The catalog remains nineteen editorial entries. At the pre-migration readback, fifteen cards had real historical previews and four were disabled on missing cache, not a promise of fresh data. Qualifying additional historical captures may be adopted only with their original source head, timestamps and expiry. Preview/normal cached navigation never collect in the background.
 
-The user has authorized Meta activation using the existing server-only credential and the same physical original cumulative US$50 ledger. The new public runtime adds an atomic rolling-hour US$0.30 cap at a declared conservative10CNY/USD accounting ceiling, plus per-IP and deployment action limits described in [DEPLOYMENT.md](DEPLOYMENT.md). Source and model inputs are URL-only and limited to public repositories with recognized open-source licenses. Live paid acceptance is still a separate one-request check recorded with its real ledger delta; configuration alone is not model success.
+D1 migration is a separately reviewed deployment, not completed by these historical receipts. The candidate implements an atomic Worker D1.batch import, database identity and full management/RPC content gates, plus an edge fence and retirement drain before the first legacy app restart. The installed SHA/backend and real public runtime D1 writes must be recorded after cutover. No health, synthetic test or sentinel probe substitutes for that acceptance.
+
+Meta Muse Spark1.3 uses the existing server-only credential and same physical original cumulative US$50 ledger, with the new public US$0.30 rolling-hour cap and IP/deployment guards. Migration/setup/tests do not call paid APIs or initialize/copy another ledger. Existing real Meta acceptance and historical costs remain independent evidence; a storage migration does not reset them.
 
 The earlier table below records the initial public cutover, not the final candidate's fresh-collection or paid-call count. Final integrated checks before rollout: TypeScript and build passed;211 unit tests and22 synthetic Chromium journeys passed, zero failures/skips. CI and installed source identity are read back separately for the final commit.
 
@@ -22,7 +24,7 @@ The first fully checked runtime/gateway code commit is `cc4c54204503b8ec103d616b
 | --- | --- |
 | Local TypeScript, Bun tests, production build | Passed; 181 unit tests, 0 failed, 0 skipped |
 | Production Chromium fixtures | 19 passed, 0 failed, 0 skipped; synthetic API interception, no paid calls |
-| Public landing, gallery, favicon, loaded JS/CSS, prefixed API | HTTP 200; initial catalog contained20 entries; final open-source-only catalog contains19 |
+| Public landing, gallery, favicon, loaded JS/CSS, prefixed API | HTTP 200; initial catalog contained20 entries; current editorial catalog contains19 |
 | Real public import | `luworks/github-factory`, captured at `2026-11-04T22:44:02.180Z`, head `cc4c542...`; full path tree, 10 districts, 9 relationships, 4 workflow runs, rules guide |
 | Real forced refresh | Capture advanced to `2026-11-04T22:45:12.905Z`; GitHub health `ok`; no model request |
 | Exploration | Five styles rendered; selected district and pinned sources retained; English/Chinese, actual CI/commit activity, direct world reload and successful share-copy feedback exercised |

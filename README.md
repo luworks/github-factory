@@ -4,14 +4,14 @@
 
 ### Your codebase, a living world.
 
-Turn an open-source GitHub repository into a world you can explore.<br />
+Turn a public GitHub repository into a world you can explore.<br />
 See the architecture. Follow the work. Find your next move.
 
 **[Explore the live site ↗](https://chaorders.com/github-factory/)** · **[简体中文](README.zh-CN.md)** · [Quick start](#run-it-locally) · [How it works](#from-repository-to-world)
 
 [![MIT license](https://img.shields.io/badge/license-MIT-87977b?style=flat-square)](LICENSE)
 [![Bun 1.4.4](https://img.shields.io/badge/Bun-1.4.4-253931?style=flat-square)](https://bun.sh)
-[![English and Chinese](https://img.shields.io/badge/languages-EN%20%2F%20中文-b5a07a?style=flat-square)](README.zh-CN.md)
+[![English UI](https://img.shields.io/badge/interface-English-b5a07a?style=flat-square)](docs/PRODUCT.md)
 [![CI](https://github.com/luworks/github-factory/actions/workflows/ci.yml/badge.svg)](https://github.com/luworks/github-factory/actions/workflows/ci.yml)
 
 [![Moon Factory homepage: a repository becomes an isometric lunar world](docs/assets/readme/landing.webp)](https://chaorders.com/github-factory/)
@@ -21,6 +21,8 @@ See the architecture. Follow the work. Find your next move.
 </div>
 
 ## See it in motion
+
+The recordings below are historical captures; their Chinese UI is retained as historical evidence. The current UI is English only, and license metadata does not restrict public GitHub analysis.
 
 A moon base, an industrial network, a command center, a fortified city, a hexagonal civilization. Switch the visual language while keeping the same repository, district identities and source evidence.
 
@@ -45,7 +47,7 @@ A moon base, an industrial network, a command center, a fortified city, a hexago
 
 ## From repository to world
 
-1. **Choose a public, open-source repository.** Paste its GitHub root URL, or explore an available cached world in the atlas.
+1. **Choose any publicly accessible repository.** Paste its GitHub root URL, or explore an available cached world in the atlas.
 2. **Read the landscape.** Paths and manifests become districts; source evidence and structural inference explain the connections.
 3. **Inspect a place.** Select a district to see its role, evidence state and links pinned to the captured source head.
 4. **Follow the work.** Read issues, pull requests, commits and workflow results in context. Success, failure, skipped and missing evidence stay distinct.
@@ -55,7 +57,7 @@ A moon base, an industrial network, a command center, a fortified city, a hexago
 | --- | --- | --- |
 | Pan, zoom, search and select districts | Source-linked architecture and suggested next steps | Observed / inferred / unknown states |
 | Five original procedural styles | Issues, pull requests, commits and CI activity | Captured head, timestamp and coverage |
-| English and Chinese interface | Shareable world URLs | Explicit stale, partial and unavailable states |
+| English-only interface | Shareable world URLs | Explicit stale, partial and unavailable states |
 
 ## One repository. Five worlds.
 
@@ -84,13 +86,13 @@ The map is a way into the evidence. Open a district, inspect its source, then mo
 <table>
 <tr>
 <td width="50%"><img src="docs/assets/readme/activity.webp" alt="Next.js activity with separate issue, pull request, workflow and commit evidence" /><br /><strong>Follow actual work</strong> — workflow results retain their original links and conclusions.</td>
-<td width="50%"><img src="docs/assets/readme/chinese.webp" alt="Chinese field-guide interface with source evidence and architecture guidance" /><br /><strong>Read in your language</strong> — switch between English and Chinese throughout the experience.</td>
+<td width="50%"><img src="docs/assets/readme/chinese.webp" alt="Chinese field-guide interface with source evidence and architecture guidance" /><br /><strong>Historical interface capture</strong> — this recording retains the earlier Chinese UI. The current product UI is English only.</td>
 </tr>
 </table>
 
 **Observed** means supported by captured source evidence. **Inferred** means a structural interpretation. **Unknown** means the evidence does not establish the fact. Moving particles illustrate connections; they do not measure runtime traffic. A historical green workflow is not proof of current deployment health.
 
-## An atlas of open source
+## An atlas of public repositories
 
 Browse nineteen editorial entries across developer tools, frameworks, languages and infrastructure. Available previews use real cached maps; missing maps remain explicitly unavailable. The catalog is not a claim that every project has a fresh, complete collection.
 
