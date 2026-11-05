@@ -4,6 +4,7 @@ import { readAtlasSession, validatedReturnToken } from "../atlas/session";
 import { noteExploration, subscribeExploration, explorationFlags, useProgress } from "../progression/session";
 import "../atlas/atlas.css";
 import { flagSaved } from "../progression/progress-store";
+import { HistoryReplay } from "./HistoryReplay";
 import { SourceChallenge } from "./SourceChallenge";
 import { appPath } from "../base-path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -80,6 +81,7 @@ export function ExplorerPage({
   const loadGeneration = useRef(0);
   const cachedOnly = readMode === "cached";
   const [sourceVerified,setSourceVerified] = useState(false);
+  const [showReplay,setShowReplay] = useState(false);
   const [motionPaused,setMotionPaused] = useState(false), [challengeOpen,setChallengeOpen] = useState(false);
   const [world, setWorld] = useState<WorldSnapshot | null>(null),
     [error, setError] = useState<string | null>(null),
@@ -118,7 +120,7 @@ export function ExplorerPage({
   );
   useEffect(() => {
     let active = true;
-    setWorld(null); setSelected(null); setSourceVerified(false);
+    setWorld(null); setSelected(null); setSourceVerified(false); setShowReplay(false);
     void load();
     if (!cachedOnly && readMode !== "invalid")     getBudget()
       .then((b) => {
@@ -203,7 +205,7 @@ export function ExplorerPage({
           </button>
         </div>
       </header>
-      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? (flagSaved(progress, world.repo.fullName.toLowerCase(), "visited") ? "Visited on this device" : "Visited this session — not saved") : "Rendering cached world"} · No Exploration star awarded for entry. <button className="source-challenge-toggle" aria-pressed={challengeOpen} onClick={() => setChallengeOpen(x=>!x)}>{challengeOpen ? "Hide source challenge" : "Show source challenge"}</button></div>}
+      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? (flagSaved(progress, world.repo.fullName.toLowerCase(), "visited") ? "Visited on this device" : "Visited this session — not saved") : "Rendering cached world"} · No Exploration star awarded for entry. <button className="source-challenge-toggle" aria-pressed={showReplay} onClick={() => {setShowReplay(x=>!x);setTab("world");}}>{showReplay ? "Close commit replay" : "Replay captured commits"}</button> <button className="source-challenge-toggle" aria-pressed={challengeOpen} onClick={() => setChallengeOpen(x=>!x)}>{challengeOpen ? "Hide source challenge" : "Show source challenge"}</button></div>}
       {!world ? (
         <main className="world-loading">
           {error ? (
@@ -346,7 +348,8 @@ export function ExplorerPage({
             <section className="world-stage">
               {tab === "world" ? (
                 <>
-                  <WorldCanvas paused={motionPaused} world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
+                  <WorldCanvas paused={motionPaused || showReplay} world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
+                  {showReplay && cachedOnly && <HistoryReplay world={world} available={sourceVerified}/>}
                   <div className="stage-heading">
                     <span className="stage-eyebrow">{styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
                     <h1>
