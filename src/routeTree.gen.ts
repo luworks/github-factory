@@ -14,6 +14,7 @@ import { Route as ApiWorldsRouteImport } from './routes/api.worlds'
 import { Route as WorldOwnerRepoRouteImport } from './routes/world.$owner.$repo'
 import { Route as ApiBlueprintOwnerRepoRouteImport } from './routes/api.blueprint.$owner.$repo'
 import { Route as ApiGalleryPreviewOwnerRepoRouteImport } from './routes/api.gallery-preview.$owner.$repo'
+import { Route as ApiHistoryOwnerRepoRouteImport } from './routes/api.history.$owner.$repo'
 import { Route as ApiWorldOwnerRepoRouteImport } from './routes/api.world.$owner.$repo'
 
 const IndexRoute = IndexRouteImport.update({
@@ -62,6 +63,11 @@ const ApiGalleryPreviewOwnerRepoRoute =
     path: '/api/gallery-preview/$owner/$repo',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiHistoryOwnerRepoRoute = ApiHistoryOwnerRepoRouteImport.update({
+  id: '/api/history/$owner/$repo',
+  path: '/api/history/$owner/$repo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWorldOwnerRepoRoute = ApiWorldOwnerRepoRouteImport.update({
   id: '/api/world/$owner/$repo',
   path: '/api/world/$owner/$repo',
@@ -78,6 +84,7 @@ export interface FileRoutesByFullPath {
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
+  '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
 }
 export interface FileRoutesByTo {
@@ -90,6 +97,7 @@ export interface FileRoutesByTo {
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
+  '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
 }
 export interface FileRoutesById {
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
+  '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
 }
 export interface FileRouteTypes {
@@ -117,6 +126,7 @@ export interface FileRouteTypes {
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
+    | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
+    | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
   id:
     | '__root__'
@@ -141,6 +152,7 @@ export interface FileRouteTypes {
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
+    | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
   fileRoutesById: FileRoutesById
 }
@@ -154,6 +166,7 @@ export interface RootRouteChildren {
   WorldOwnerRepoRoute: typeof WorldOwnerRepoRoute
   ApiBlueprintOwnerRepoRoute: typeof ApiBlueprintOwnerRepoRoute
   ApiGalleryPreviewOwnerRepoRoute: typeof ApiGalleryPreviewOwnerRepoRoute
+  ApiHistoryOwnerRepoRoute: typeof ApiHistoryOwnerRepoRoute
   ApiWorldOwnerRepoRoute: typeof ApiWorldOwnerRepoRoute
 }
 
@@ -222,6 +235,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiGalleryPreviewOwnerRepoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/history/$owner/$repo': {
+      id: '/api/history/$owner/$repo'
+      path: '/api/history/$owner/$repo'
+      fullPath: '/api/history/$owner/$repo'
+      preLoaderRoute: typeof ApiHistoryOwnerRepoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/world/$owner/$repo': {
       id: '/api/world/$owner/$repo'
       path: '/api/world/$owner/$repo'
@@ -242,6 +262,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorldOwnerRepoRoute: WorldOwnerRepoRoute,
   ApiBlueprintOwnerRepoRoute: ApiBlueprintOwnerRepoRoute,
   ApiGalleryPreviewOwnerRepoRoute: ApiGalleryPreviewOwnerRepoRoute,
+  ApiHistoryOwnerRepoRoute: ApiHistoryOwnerRepoRoute,
   ApiWorldOwnerRepoRoute: ApiWorldOwnerRepoRoute,
 }
 export const routeTree = rootRouteImport

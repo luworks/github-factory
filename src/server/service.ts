@@ -1,13 +1,9 @@
 import { CURATED_PROJECTS } from "../catalog";
 import type { FeaturedProject, WorldSnapshot } from "../contracts";
 import { analyzeCollection } from "./analysis";
-import { getConfig } from "./config";
-import { GitHubClient, GitHubError, parseRepo, type RepoCollection, type RepoRef } from "./github";
-import { WorldStore, worldStorePath } from "./store";
-import { PublicGitHubQuota } from "./public-quota";
-import { join } from "node:path";
+import { GitHubError, parseRepo, type RepoCollection, type RepoRef } from "./github";
+import { getWorldResources } from "./world-resources";
 import { isRenderableWorld } from "./world-readiness";
-import { D1WorldStore } from "./d1-store";
 import type { CachedWorld, SnapshotStore, WorldStorageStatus } from "./world-storage";
 import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
 
@@ -144,16 +140,8 @@ export function createWorldService(options: { collector: Collector; store: Snaps
 let singleton: ReturnType<typeof createWorldService> | undefined;
 function service() {
   if (!singleton) {
-    const config = getConfig();
-    let collector: GitHubClient | undefined;
-    singleton = createWorldService({
-      // Cache reads must not initialize or consume the upstream quota store.
-      collector: { collect: (ref) => {
-        const client = collector ??= new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch));
-        return client.collect(ref);
-      } },
-      store: config.worldStore === "d1" ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret, databaseId: config.d1DatabaseId }) : new WorldStore(worldStorePath(config.dataDir)),
-    });
+    const resources = getWorldResources();
+    singleton = createWorldService({ collector: resources.collector, store: resources.store });
   }
   return singleton;
 }

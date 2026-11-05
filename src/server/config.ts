@@ -1,5 +1,30 @@
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { HISTORY_RPC_URL } from "./history-rpc-contract";
+import type { HistoryRpcStoreConfig } from "./d1-history-store";
+
+export interface HistoryRuntimeConfig {
+  readonly publicOrigin: string;
+  readonly rpc: HistoryRpcStoreConfig;
+  readonly cursorKeyHex: string;
+}
+
+/** Server-only opt-in. Invalid/missing settings are indistinguishably disabled;
+ * no default signing key, storage fallback, environment read or provisioning. */
+export function historyConfig(env: Record<string, string>): HistoryRuntimeConfig | null {
+  if (env.MOONSHOT_HISTORY_ENABLED !== "true" || env.MOONSHOT_WORLD_STORE !== "d1" || env.MOONSHOT_HISTORY_SCHEMA_VERSION !== "3") return null;
+  const publicOrigin = env.MOONSHOT_PUBLIC_ORIGIN || "";
+  try { const origin = new URL(publicOrigin); if (origin.protocol !== "https:" || origin.origin !== publicOrigin) return null; } catch { return null; }
+  const secret = env.MOONSHOT_D1_STORAGE_SECRET || "", gatewaySecret = env.MOONSHOT_GATEWAY_SECRET || "";
+  const size = (value: string) => new TextEncoder().encode(value).length;
+  const identity = { databaseId: env.MOONSHOT_D1_DATABASE_ID || "", bindingNonce: env.MOONSHOT_HISTORY_BINDING_NONCE || "", epoch: env.MOONSHOT_HISTORY_EPOCH || "", sourceSha: env.MOONSHOT_HISTORY_SOURCE_SHA || "", workerBundleSha256: env.MOONSHOT_HISTORY_WORKER_BUNDLE_SHA256 || "" };
+  const cursorKeyHex = env.MOONSHOT_HISTORY_CURSOR_KEY_HEX || "";
+  if (env.MOONSHOT_D1_STORAGE_URL !== HISTORY_RPC_URL || size(secret) < 32 || size(secret) > 256 || size(gatewaySecret) < 32 || size(gatewaySecret) > 256 ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(identity.databaseId) ||
+      !/^[a-f0-9]{32}$/.test(identity.bindingNonce) || !/^[a-f0-9]{32}$/.test(identity.epoch) || !/^[a-f0-9]{40}$/.test(identity.sourceSha) ||
+      !/^[a-f0-9]{64}$/.test(identity.workerBundleSha256) || !/^[a-f0-9]{64}$/.test(cursorKeyHex)) return null;
+  return { publicOrigin, rpc: { endpoint: HISTORY_RPC_URL, secret, identity }, cursorKeyHex };
+}
 
 // Explicit project-local env loading; never walk into the parent repository.
 export function projectEnv(): Record<string, string> {

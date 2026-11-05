@@ -7,12 +7,12 @@ import { getConfig, projectEnv } from "./config";
 import { HttpError } from "./http";
 
 export type AccessBucket = "request" | "collection" | "ai" | "global-ai";
-type AccessConfig = { secret: string; publicOrigin: string; dataDir: string; requestsPerMinute: number; collectionsPerHour: number; aiPerHour: number; aiGlobalPerHour: number };
+export type AccessConfig = { secret: string; publicOrigin: string; dataDir: string; requestsPerMinute: number; collectionsPerHour: number; aiPerHour: number; aiGlobalPerHour: number };
 const bounded = (input: string | undefined, fallback: number, maximum: number) =>
   input === undefined || input === "" ? fallback : Math.max(0, Math.min(maximum, Math.floor(Number(input) || 0)));
 
-export function accessConfig(): AccessConfig {
-  const config = getConfig(), env = projectEnv();
+export function accessConfig(env: Record<string, string> = projectEnv()): AccessConfig {
+  const config = getConfig(env);
   return { secret: env.MOONSHOT_GATEWAY_SECRET || "", publicOrigin: config.publicOrigin, dataDir: config.dataDir,
     requestsPerMinute: bounded(env.MOONSHOT_IP_REQUESTS_PER_MINUTE, 10, 30),
     collectionsPerHour: bounded(env.MOONSHOT_IP_COLLECTIONS_PER_HOUR, 6, 20),
@@ -67,11 +67,26 @@ export class ClientQuota {
 }
 
 let singleton: { path: string; quota: ClientQuota } | undefined;
-export function accessRequest(request: Request) {
-  const config = accessConfig(), identity = clientIdentity(request, config), path = join(config.dataDir, "public-access.sqlite");
+function identityForRequest(request: Request, config: AccessConfig, requireGateway: boolean) {
+  if (requireGateway) {
+    try { const origin = new URL(config.publicOrigin); if (origin.origin !== config.publicOrigin || origin.protocol !== "https:" || config.secret.length < 32) throw new Error(); }
+    catch { throw new HttpError(503, "GATEWAY_UNCONFIGURED", "The public gateway is not configured."); }
+  }
+  return clientIdentity(request, config);
+}
+/** The original admission authority, also usable with a literal test config.
+ * One request debit; collection/AI closures retain THIS exact quota instance. */
+export function admitAccessRequest(request: Request, config: AccessConfig, quota: Pick<ClientQuota, "take" | "takeAi">, requireGateway = false) {
+  const identity = identityForRequest(request, config, requireGateway);
+  quota.take(identity, "request");
+  return { identity, admitCollection: () => quota.take(identity, "collection"), admitAi: () => quota.takeAi(identity) };
+}
+export function accessRequest(request: Request, options?: { requireGateway: true }) {
+  const config = accessConfig(), path = join(config.dataDir, "public-access.sqlite");
+  // Authenticate before opening the persisted authority, including strict history.
+  identityForRequest(request, config, options?.requireGateway === true);
   if (!singleton || singleton.path !== path) {
     singleton?.quota.close(); singleton = { path, quota: new ClientQuota(path, config) };
   }
-  singleton.quota.take(identity, "request");
-  return { admitCollection: () => singleton!.quota.take(identity, "collection"), admitAi: () => singleton!.quota.takeAi(identity) };
+  return admitAccessRequest(request, config, singleton.quota, options?.requireGateway === true);
 }
