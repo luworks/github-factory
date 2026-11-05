@@ -6,6 +6,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AtlasRouteImport } from './routes/atlas'
 import { Route as ApiBudgetRouteImport } from './routes/api.budget'
 import { Route as ApiGalleryRouteImport } from './routes/api.gallery'
 import { Route as ApiHealthRouteImport } from './routes/api.health'
@@ -18,6 +19,11 @@ import { Route as ApiWorldOwnerRepoRouteImport } from './routes/api.world.$owner
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasRoute = AtlasRouteImport.update({
+  id: '/atlas',
+  path: '/atlas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiBudgetRoute = ApiBudgetRouteImport.update({
@@ -64,6 +70,7 @@ const ApiWorldOwnerRepoRoute = ApiWorldOwnerRepoRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/atlas': typeof AtlasRoute
   '/api/budget': typeof ApiBudgetRoute
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
@@ -75,6 +82,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/atlas': typeof AtlasRoute
   '/api/budget': typeof ApiBudgetRoute
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
@@ -87,6 +95,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/atlas': typeof AtlasRoute
   '/api/budget': typeof ApiBudgetRoute
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
@@ -100,6 +109,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/atlas'
     | '/api/budget'
     | '/api/gallery'
     | '/api/health'
@@ -111,6 +121,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/atlas'
     | '/api/budget'
     | '/api/gallery'
     | '/api/health'
@@ -122,6 +133,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/atlas'
     | '/api/budget'
     | '/api/gallery'
     | '/api/health'
@@ -134,6 +146,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AtlasRoute: typeof AtlasRoute
   ApiBudgetRoute: typeof ApiBudgetRoute
   ApiGalleryRoute: typeof ApiGalleryRoute
   ApiHealthRoute: typeof ApiHealthRoute
@@ -151,6 +164,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas': {
+      id: '/atlas'
+      path: '/atlas'
+      fullPath: '/atlas'
+      preLoaderRoute: typeof AtlasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/budget': {
@@ -214,6 +234,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AtlasRoute: AtlasRoute,
   ApiBudgetRoute: ApiBudgetRoute,
   ApiGalleryRoute: ApiGalleryRoute,
   ApiHealthRoute: ApiHealthRoute,

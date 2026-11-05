@@ -61,6 +61,7 @@ export function LandingPage() {
       <header className="site-header">
         <Brand />
         <nav>
+          <a href={appPath("/atlas")}>Explore Atlas</a>
           <a href="#worlds">{"Explore worlds"}</a>
           <a href="#perspectives">{"Perspectives"}</a>
           <a className="header-cta" href="#launch">
@@ -140,6 +141,7 @@ export function LandingPage() {
                 </button>
               ))}
             </div>
+            <a className="primary-button" style={{minHeight:44,fontSize:14,marginTop:14}} href={appPath("/atlas")}>Explore Atlas <ArrowUpRight size={14} /></a>
             <div className="hero-assurances">
               <span>
                 <Github size={13} />

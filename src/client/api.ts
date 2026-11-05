@@ -19,7 +19,7 @@ function worldRequest(owner: string, repo: string, cached: boolean): Promise<Wor
   const url = `/api/world/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${cached ? "?mode=cached" : ""}`;
   const pending = pendingWorlds.get(url);
   if (pending) return pending;
-  const requestWorld = request<WorldSnapshot>(url);
+  const requestWorld = request<WorldSnapshot>(url,cached ? {signal:AbortSignal.timeout(8000)} : undefined);
   pendingWorlds.set(url, requestWorld);
   const clear = () => {
     if (pendingWorlds.get(url) === requestWorld) pendingWorlds.delete(url);

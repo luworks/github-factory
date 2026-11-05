@@ -9,14 +9,16 @@ export interface WorldCanvasProps {
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   className?: string;
+  onRendered?: () => void;
 }
-export function WorldCanvas({ world, style, selectedId, onSelect, className = "" }: WorldCanvasProps) {
+export function WorldCanvas({ world, style, selectedId, onSelect, className = "", onRendered }: WorldCanvasProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
     box = useRef<HTMLDivElement>(null),
     cam = useRef({ x: 0, y: 0, k: 1 });
   const drag = useRef<{ id: number; x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
-  const data = useRef({ world, style, selectedId, onSelect });
-  data.current = { world, style, selectedId, onSelect };
+  const data = useRef({ world, style, selectedId, onSelect, onRendered });
+  const renderedIdentity = useRef("");
+  data.current = { world, style, selectedId, onSelect, onRendered };
   const layoutIdentity = useRef("");
   const placed = useRef<PlacedNode[]>([]),
     hover = useRef<string | null>(null),
@@ -145,6 +147,8 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       g.fillStyle = vignette;
       g.fillRect(0, 0, width, height);
       paintLabels(g, placed.current, s, sel, hover.current, c);
+      const identity = JSON.stringify([w.repo.fullName, w.headSha, w.collectedAt, w.source]);
+      if (identity !== renderedIdentity.current) { renderedIdentity.current = identity; data.current.onRendered?.(); }
     };
     frame = requestAnimationFrame(draw);
     const wheel = (e: WheelEvent) => {

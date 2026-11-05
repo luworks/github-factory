@@ -1,3 +1,8 @@
+import { Link } from "@tanstack/react-router";
+import { cachedWorldReady, worldIdentity } from "../evidence/captured";
+import { readAtlasSession, validatedReturnToken } from "../atlas/session";
+import { noteExploration, subscribeExploration, explorationFlags } from "../progression/session";
+import "../atlas/atlas.css";
 import { appPath } from "../base-path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -68,6 +73,7 @@ export function ExplorerPage({
   repo: string;
   readMode?: "legacy" | "cached" | "invalid";
 }) {
+  const [atlasToken,setAtlasToken] = useState<string|null>(null), [,setProgressRevision] = useState(0);
   const loadGeneration = useRef(0);
   const cachedOnly = readMode === "cached";
   const [world, setWorld] = useState<WorldSnapshot | null>(null),
@@ -93,6 +99,7 @@ export function ExplorerPage({
         if (readMode === "invalid") throw new Error("Invalid exploration mode. Return to Atlas to choose a cached world.");
         const next = await (cachedOnly ? getCachedWorld(owner, repo) : refresh ? refreshWorld(owner, repo) : getWorld(owner, repo));
         if (generation !== loadGeneration.current) return;
+        if (cachedOnly && !cachedWorldReady(next)) throw new Error("This cached capture cannot be verified for exploration.");
         setWorld(next);
         setError(null);
       } catch (e) {
@@ -120,6 +127,11 @@ export function ExplorerPage({
       if (timer) clearInterval(timer);
     };
   }, [owner, repo, load, cachedOnly, readMode]);
+  useEffect(() => {
+    if (!cachedOnly) return;
+    setAtlasToken(validatedReturnToken(window.location.search,readAtlasSession().value));
+    return subscribeExploration(()=>setProgressRevision(x=>x+1));
+  },[cachedOnly]);
   const changeStyle = (s: StyleId) => {
     setStyle(s);
     const url = new URL(window.location.href);
@@ -165,6 +177,7 @@ export function ExplorerPage({
     <div className={`explorer explorer-${style}`}>
       <header className="explorer-header">
         <Brand compact />
+        {cachedOnly && <Link className="explorer-atlas-back" to="/atlas" search={atlasToken ? {atlasReturn:atlasToken} : {home:"1"}} preload={false}>Back to Atlas</Link>}
         <span className="breadcrumb-divider">/</span>
         <a className="repo-breadcrumb" href={world?.repo.url ?? `https://github.com/${owner}/${repo}`} target="_blank" rel="noreferrer">
           <Github size={15} />
@@ -182,6 +195,7 @@ export function ExplorerPage({
           </button>
         </div>
       </header>
+      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? "Visited this session" : "Rendering cached world"} · No Exploration star awarded for entry.</div>}
       {!world ? (
         <main className="world-loading">
           {error ? (
@@ -324,7 +338,7 @@ export function ExplorerPage({
             <section className="world-stage">
               {tab === "world" ? (
                 <>
-                  <WorldCanvas world={world} style={style} selectedId={selectedId} onSelect={select} />
+                  <WorldCanvas world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
                   <div className="stage-heading">
                     <span className="stage-eyebrow">{styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
                     <h1>
