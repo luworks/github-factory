@@ -16,11 +16,14 @@ export function parseWorldCaptureJson(text: string): unknown {
   } catch { return reject(); }
 }
 const key = (v: unknown) => { try { const normalized = captureKey(v); if (normalized !== v) return reject(); return normalized; } catch { return reject(); } };
+// Source spelling is evidence. Validate the original owner/repo syntax without
+// replacing its case; only lookup and wire keys require normalized spelling.
+const sourceName = (v: unknown) => { try { captureKey(v); return true; } catch { return false; } };
 function generation(v: unknown) { try { return { ...worldGenerationShape(v as RemoteWorldGeneration) }; } catch { return reject(); } }
 function write(v: unknown): WorldCaptureWrite {
   if (!record(v) || !exact(v, ["snapshot", "savedAt", "expiresAt"]) || typeof v.snapshot !== "string" || captureBytes(v.snapshot) > WORLD_CAPTURE_LIMITS.snapshotBytes || !worldWireInteger(v.savedAt) || !worldWireInteger(v.expiresAt) || v.expiresAt - v.savedAt < 60000 || v.expiresAt - v.savedAt > 120000) return reject();
   const snapshot = parseWorldCaptureJson(v.snapshot);
-  if (!record(snapshot) || !record(snapshot.repo) || key(snapshot.repo.fullName) !== snapshot.repo.fullName || snapshot.source !== "github" || snapshot.schemaVersion !== 1 || snapshot.repo.url !== `https://github.com/${snapshot.repo.fullName}` || typeof snapshot.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(snapshot.headSha) || typeof snapshot.collectedAt !== "string" || !Number.isFinite(Date.parse(snapshot.collectedAt)) || !Array.isArray(snapshot.nodes) || snapshot.nodes.length > 100 || !Array.isArray(snapshot.edges) || snapshot.edges.length > 256 || !snapshot.blueprint) return reject();
+  if (!record(snapshot) || !record(snapshot.repo) || !sourceName(snapshot.repo.fullName) || snapshot.source !== "github" || snapshot.schemaVersion !== 1 || snapshot.repo.url !== `https://github.com/${snapshot.repo.fullName}` || typeof snapshot.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(snapshot.headSha) || typeof snapshot.collectedAt !== "string" || !Number.isFinite(Date.parse(snapshot.collectedAt)) || !Array.isArray(snapshot.nodes) || snapshot.nodes.length > 100 || !Array.isArray(snapshot.edges) || snapshot.edges.length > 256 || !snapshot.blueprint) return reject();
   return { snapshot: v.snapshot, savedAt: v.savedAt, expiresAt: v.expiresAt };
 }
 export type WorldCaptureRpcOperation =

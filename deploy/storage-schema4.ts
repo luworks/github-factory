@@ -200,7 +200,9 @@ export async function assertStorageSchema4(db: HistoryD1Binding, identity: World
     const markers = await db.prepare("SELECT version,applied_at,sql_sha256 FROM schema_migrations ORDER BY version LIMIT 5").all<{ version: number; applied_at: string; sql_sha256: string }>();
     if (!markers.success || !Array.isArray(markers.results) || markers.results.length !== 4 || markers.results.some((m, i) => m.version !== WORLD_SCHEMA4_MIGRATIONS[i]![0] || m.sql_sha256 !== WORLD_SCHEMA4_MIGRATIONS[i]![1] || typeof m.applied_at !== "string" || m.applied_at.length > 64 || !Number.isFinite(Date.parse(m.applied_at)))) throw Error();
     const foreign = await db.prepare("PRAGMA foreign_keys").first<{ foreign_keys: number }>(); if (foreign?.foreign_keys !== 1) throw Error();
-    const schema = await db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' OR type='index' ORDER BY name LIMIT 35").all<{ type: string; name: string; tbl_name: string; sql: string | null }>();
+    // Inventory every object, including pinned SQLite auto-indexes. A name
+    // prefix (especially LIKE's wildcard underscore) is not an exclusion grant.
+    const schema = await db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master ORDER BY name LIMIT 35").all<{ type: string; name: string; tbl_name: string; sql: string | null }>();
     if (!schema.success || !Array.isArray(schema.results) || schema.results.length !== Object.keys(pins).length) throw Error();
     const seen = new Set<string>();
     for (const row of schema.results) { const pin = pins[row.name]; if (!pin || seen.has(row.name) || row.type !== pin[0] || row.tbl_name !== pin[1] || (pin[2] === null ? row.sql !== null : typeof row.sql !== "string" || await captureHash(schema4SqlTokens(row.sql)) !== pin[2])) throw Error(); seen.add(row.name); }

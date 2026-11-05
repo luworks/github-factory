@@ -190,3 +190,70 @@ test("SYNTHETIC quoted-literal DDL alterations, missing key and mismatched autho
     } finally { f.close(); }
   }
 });
+
+test("SYNTHETIC complete inventory includes literal-prefix/case lookalike objects and blocks executable side effects before business SQL", async () => {
+  const statements = [
+    ...["sqlitex_mutator", "SQLITEX_MUTATOR", "sqliteX-mutator", "sqliteΩ_mutator", "sqlite", "normal_mutator"].map(name => `CREATE TRIGGER "${name}" AFTER INSERT ON worlds BEGIN INSERT INTO migration_sentinels VALUES('unreviewed-effect','SYNTHETIC side effect'); END`),
+    'CREATE TABLE "sqlitex_hidden_table"(value TEXT)',
+    'CREATE VIEW "SQLITEX_hidden_view" AS SELECT repo FROM worlds',
+    'CREATE INDEX "sqlitex_hidden_index" ON worlds(saved_at)',
+  ];
+  for (const statement of statements) {
+    const f = await fixture();
+    try {
+      f.a.db.exec(statement); const before = f.a.db.serialize();
+      await expect(assertStorageSchema4(f.a, f.identity)).rejects.toThrow();
+      const response = await f.rpc({ op: "put", write: write() }); expect(response.status).toBe(503); expect(response.body.writeOutcome).toBe("not-started");
+      expect(f.a.calls).toHaveLength(0); expect(f.a.db.query("SELECT * FROM worlds").all()).toEqual([]); expect(f.a.db.query("SELECT * FROM migration_sentinels").all()).toEqual([]); expect(f.a.db.serialize()).toEqual(before);
+    } finally { f.close(); }
+  }
+});
+
+test("SYNTHETIC original pinned SQLite auto-indexes remain admitted by full inventory and authenticated wrapper", async () => {
+  const f = await fixture();
+  try {
+    const indexes = f.a.db.query("SELECT name,sql FROM sqlite_master WHERE type='index' AND substr(name,1,17)='sqlite_autoindex_'").all() as { name: string; sql: string | null }[];
+    expect(indexes.length).toBeGreaterThan(0); expect(indexes.every(i => i.sql === null)).toBe(true); await assertStorageSchema4(f.a, f.identity);
+    expect((await f.rpc({ op: "put", write: write() })).status).toBe(200); expect((await f.rpc({ op: "getMany", keys: [canonical] })).body.result[0].snapshot).toBe(write().snapshot);
+  } finally { f.close(); }
+});
+
+for (const operation of ["put", "captureCommit"] as const) test(`SYNTHETIC ${operation} preserves original mixed-case GitHub source spelling/raw bytes and normalized lookup keys`, async () => {
+  const f = await fixture();
+  try {
+    const original = "Synthetic/MiXeD", normalized = original.toLowerCase(), w = write(original, 2000, "Meta API / README 原始TEXT"); w.snapshot = JSON.stringify(JSON.parse(w.snapshot), null, 2);
+    const generation = operation === "captureCommit" ? await f.begin() : undefined;
+    const result = await f.rpc(operation === "put" ? { op: "put", write: w } : { op: "captureCommit", generation, write: w }); expect(result.status).toBe(200);
+    const rows = await f.rpc({ op: "getMany", keys: [normalized, ...(generation ? [input] : [])] }); expect(rows.status).toBe(200); expect(rows.body.result.length).toBe(generation ? 2 : 1);
+    for (const row of rows.body.result) { expect(row.repo).toBe(normalized); expect(row.snapshot).toBe(w.snapshot); expect(row.hash).toBe(await captureHash(w.snapshot)); expect(JSON.parse(row.snapshot).repo).toEqual(JSON.parse(w.snapshot).repo); }
+    const summary = await f.rpc({ op: "summaries", keys: [normalized] }); expect(summary.status).toBe(200); expect(summary.body.result[0].repo.fullName).toBe(original); expect(summary.body.result[0].repo.owner).toBe("Synthetic"); expect(summary.body.result[0].repo.name).toBe("MiXeD"); expect(summary.body.result[0].repo.url).toBe(`https://github.com/${original}`);
+    const persisted = f.a.db.query("SELECT repo,snapshot,snapshot_sha256 FROM worlds WHERE repo=?").get(normalized); expect(persisted).toEqual({ repo: normalized, snapshot: w.snapshot, snapshot_sha256: await captureHash(w.snapshot) });
+    if (generation) expect((await f.rpc({ op: "captureInspect", generation })).body.result.status).toBe("committed");
+    const before = f.dump(); expect((await f.rpc({ op: "getMany", keys: [original] })).status).toBe(400); expect(f.dump()).toBe(before);
+  } finally { f.close(); }
+});
+
+test("SYNTHETIC mixed-case source identity still rejects URL/shape confusion and mismatched original source links", async () => {
+  const f = await fixture();
+  try {
+    const before = f.dump();
+    for (const bad of ["https://github.com/Synthetic/MiXeD", "Synthetic/MiXeD/path", "Synthetic/..", "Synthetic/MiXeD?x=1", " Synthetic/MiXeD"]) {
+      const w = write(bad); expect((await f.rpc({ op: "put", write: w })).status).toBe(400); expect(f.dump()).toBe(before);
+    }
+    const w = write("Synthetic/MiXeD"), parsed = JSON.parse(w.snapshot); parsed.repo.url = "https://github.com/synthetic/mixed"; w.snapshot = JSON.stringify(parsed);
+    expect((await f.rpc({ op: "put", write: w })).status).toBe(400); expect(f.dump()).toBe(before); expect(f.a.calls).toHaveLength(0);
+  } finally { f.close(); }
+});
+
+test("SYNTHETIC actual mixed-case private producer evidence casefolds only authority keys and revokes original snapshots/aliases", async () => {
+  const f = await fixture();
+  try {
+    const original = "Synthetic/MiXeD", normalized = original.toLowerCase(); expect((await f.rpc({ op: "put", write: write(original) })).status).toBe(200); await f.core.aliasLegacy(known, normalized);
+    const g = await f.begin(), context = createCollectionObservation(g.repo, g); let rejection: unknown;
+    const client = new GitHubClient("", async target => new URL(String(target)).pathname === `/repos/${input}` ? new Response(null, { status: 301, headers: { location: `https://api.github.com/repos/${original}` } }) : Response.json({ private: true, visibility: "private", full_name: original, id: 123 }));
+    try { await client.collect(parseRepo(input), context); } catch (e) { rejection = e; }
+    const proof = takePrivateRepositoryObservation(rejection, context, input, g); expect(proof).toBeDefined(); const claim = await signWorldPrivateObservation(g, proof!, f.identity, f.key);
+    const response = await f.rpc({ op: "captureRevoke", generation: g, claim }); expect(response.status).toBe(200); expect(response.body.result.barrier).toBe("confirmed");
+    expect(f.a.db.query("SELECT repo,denied FROM world_capture_barriers ORDER BY repo").all()).toEqual([input, normalized, known].sort().map(repo => ({ repo, denied: 1 }))); expect((await f.rpc({ op: "getMany", keys: [input, normalized, known] })).body.result).toEqual([]);
+  } finally { f.close(); }
+});
