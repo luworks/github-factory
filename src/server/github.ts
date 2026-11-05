@@ -142,6 +142,12 @@ class MetadataRedirect extends Error {
   }
 }
 
+/** Shared existing admission policy; license never grants or denies access. */
+export function isPublicRepositoryMetadata(value: unknown): boolean {
+  const metadata = value as { private?: unknown; visibility?: unknown } | null;
+  return Boolean(metadata && metadata.private === false && (!metadata.visibility || metadata.visibility === "public"));
+}
+
 /** One bounded collection; fetch is injected in tests. Redirects cannot move credentials. */
 export class GitHubClient {
   private blockedUntil = 0;
@@ -312,7 +318,7 @@ export class GitHubClient {
     const deadline = this.now() + GITHUB_LIMITS.collectionMs;
     const read = (path: string, maxBytes?: number) => this.request(path, maxBytes, deadline);
     const metadata = await this.metadata(ref, deadline);
-    if (!metadata || metadata.private !== false || (metadata.visibility && metadata.visibility !== "public"))
+    if (!isPublicRepositoryMetadata(metadata))
       throw new GitHubError("PUBLIC_ONLY", 403, "Only public repositories can be analyzed.");
 
     const canonical = parseRepo(text(metadata.full_name, 150));

@@ -382,3 +382,10 @@ test("bounded recursive sampling retains a later root module after a large early
   expect(result.tree.some((entry) => entry.path === "zzz-core/main.ts")).toBe(true);
   expect(result.treeState).toBe("truncated");
 });
+
+test("shared public-metadata predicate preserves the existing collector policy matrix exactly",async()=>{
+ const {isPublicRepositoryMetadata}=await import("../src/server/github");
+ for(const privateValue of [false,true,undefined,null])for(const visibility of [undefined,null,"",false,0,"public","private","internal",true]){
+  const metadata={private:privateValue,visibility,full_name:"example/project",default_branch:"main",license:{spdx_id:"NOASSERTION"}},oldPolicy=Boolean(metadata&&metadata.private===false&&(!metadata.visibility||metadata.visibility==="public"));expect(isPublicRepositoryMetadata(metadata)).toBe(oldPolicy);const f=fixture({metadata});if(oldPolicy){expect((await f.client.collect(parseRepo("example/project"))).repo.license).toBe("NOASSERTION");expect(f.calls.length).toBeGreaterThan(1);}else{await expect(f.client.collect(parseRepo("example/project"))).rejects.toMatchObject({code:"PUBLIC_ONLY"});expect(f.calls).toHaveLength(1);}
+ }
+});
