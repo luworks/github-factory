@@ -46,7 +46,7 @@ export class WorldStore {
     }
   }
   summaries(repos: string[], now = Date.now()): WorldSummary[] {
-    return repos.flatMap((key) => { const entry = this.get(key); return entry ? [{ key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now) }] : []; });
+    return repos.flatMap((key) => { const entry = this.get(key, now, { readOnly: true }); return entry ? [{ key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now) }] : []; });
   }
   status(): WorldStorageStatus {
     const worlds = this.db.query("SELECT COUNT(*) count FROM worlds").get() as { count: number };

@@ -4,7 +4,7 @@ import { ProgressStore, completionFor, type ProgressState } from "./progress-sto
 import type { Attempt, ProgressChallenge } from "./contracts";
 export interface ExplorationFlags { discovered: boolean; visited: boolean }
 const store = new ProgressStore();
-let state: ProgressState = { generation: 0, repos: [], completions: [], persistence: "session", warning: null, durableCountKnown: false };
+let state: ProgressState = { generation: 0, repos: [], completions: [], durableRepos: [], persistence: "session", warning: null, durableCountKnown: false };
 const listeners = new Set<() => void>();
 let channel: BroadcastChannel | null = null, revision = 0;
 function publish(next: ProgressState) { state = next; for (const listener of listeners) listener(); }
@@ -15,7 +15,7 @@ export function noteExploration(identity: WorldIdentity, event: "discovered" | "
     if (identity.source !== "github") return;
     const old = explorationFlags(identity.repoKey); if (old.discovered && (event === "discovered" || old.visited)) return;
     const version = ++revision;
-    void store.note(identity, event).then(next => { if (version === revision) publish(next); channel?.postMessage("changed"); });
+    void store.note(identity, event).then(next => { if (version === revision) publish(next); channel?.postMessage("changed"); }).catch(() => { void reconcileProgress(); });
 }
 export function subscribeExploration(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; }
 export async function completeExploration(challenge: ProgressChallenge, attempt: Attempt, identity: WorldIdentity | null, stillCurrent?: () => boolean) {

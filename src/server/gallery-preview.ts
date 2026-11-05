@@ -1,3 +1,5 @@
+import { worldShapeValid } from "../evidence/world-shape";
+import { WorldStorageError } from "./world-storage";
 import type { WorldSnapshot } from "../contracts";
 import type { RepositoryPreviewData } from "../gallery/contracts";
 import { parseRepo } from "./github";
@@ -10,8 +12,9 @@ export function projectRepositoryPreview(input: string, world: WorldSnapshot | n
     github: "unknown", tree: "unavailable", nodes: [], edges: [], totalNodes: 0, totalEdges: 0, limited: false,
   };
   if (!world) return empty;
-  if (world.source !== "github" || world.repo.fullName.toLowerCase() !== fullName.toLowerCase())
+  if (world.source !== "github" || typeof world.repo?.fullName !== "string" || world.repo.fullName.toLowerCase() !== fullName.toLowerCase())
     return { ...empty, reason: "source-unverified" };
+  if (!worldShapeValid(world)) throw new WorldStorageError();
   const captured = Date.parse(world.collectedAt);
   const validTime = Number.isFinite(captured) && captured <= now && Number.isFinite(world.refreshAfter);
   const stale = !validTime || world.refreshAfter <= now || world.coverage.notes.some((note) => /\bSTALE\b/.test(note));

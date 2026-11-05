@@ -1,8 +1,9 @@
 import { Link } from "@tanstack/react-router";
 import { cachedWorldReady, worldIdentity } from "../evidence/captured";
 import { readAtlasSession, validatedReturnToken } from "../atlas/session";
-import { noteExploration, subscribeExploration, explorationFlags } from "../progression/session";
+import { noteExploration, subscribeExploration, explorationFlags, useProgress } from "../progression/session";
 import "../atlas/atlas.css";
+import { flagSaved } from "../progression/progress-store";
 import { SourceChallenge } from "./SourceChallenge";
 import { appPath } from "../base-path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -74,6 +75,7 @@ export function ExplorerPage({
   repo: string;
   readMode?: "legacy" | "cached" | "invalid";
 }) {
+  const progress = useProgress();
   const [atlasToken,setAtlasToken] = useState<string|null>(null), [,setProgressRevision] = useState(0);
   const loadGeneration = useRef(0);
   const cachedOnly = readMode === "cached";
@@ -201,7 +203,7 @@ export function ExplorerPage({
           </button>
         </div>
       </header>
-      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? "Visited on this device" : "Rendering cached world"} · No Exploration star awarded for entry. <button className="source-challenge-toggle" aria-pressed={challengeOpen} onClick={() => setChallengeOpen(x=>!x)}>{challengeOpen ? "Hide source challenge" : "Show source challenge"}</button></div>}
+      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? (flagSaved(progress, world.repo.fullName.toLowerCase(), "visited") ? "Visited on this device" : "Visited this session — not saved") : "Rendering cached world"} · No Exploration star awarded for entry. <button className="source-challenge-toggle" aria-pressed={challengeOpen} onClick={() => setChallengeOpen(x=>!x)}>{challengeOpen ? "Hide source challenge" : "Show source challenge"}</button></div>}
       {!world ? (
         <main className="world-loading">
           {error ? (

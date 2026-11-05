@@ -1,22 +1,23 @@
+import { worldShapeValid } from "./world-shape";
 import type { WorldNode, WorldSnapshot } from "../contracts";
 import { codePointCompare, digest, snapshotKey, type EvidenceRef, type WorldIdentity } from "./contracts";
 const fullName = /^[a-zA-Z0-9][a-zA-Z0-9-]{0,38}\/[a-zA-Z0-9_.-]{1,100}$/;
 export function worldIdentity(world: WorldSnapshot, now = Date.now()): WorldIdentity | null {
-  if (!world || world.schemaVersion !== 1 || !["github", "demo"].includes(world.source) || !world.repo || !fullName.test(world.repo.fullName) ||
-    world.repo.url !== `https://github.com/${world.repo.fullName}` || !/^[a-f0-9]{40}$/i.test(world.headSha) ||
-    !Number.isFinite(Date.parse(world.collectedAt)) || Date.parse(world.collectedAt) > now || !Number.isFinite(world.refreshAfter)) return null;
+  if (!world || world.schemaVersion !== 1 || !["github", "demo"].includes(world.source) || !world.repo || typeof world.repo.fullName !== "string" || !fullName.test(world.repo.fullName) ||
+    world.repo.url !== `https://github.com/${world.repo.fullName}` || typeof world.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(world.headSha) ||
+    typeof world.collectedAt !== "string" || !Number.isFinite(Date.parse(world.collectedAt)) || Date.parse(world.collectedAt) > now || !Number.isFinite(world.refreshAfter)) return null;
   return { repoKey: world.repo.fullName.toLowerCase(), headSha: world.headSha.toLowerCase(), collectedAt: world.collectedAt, source: world.source };
 }
 export function cachedWorldReady(world: WorldSnapshot, now = Date.now()) {
   return worldIdentity(world, now)?.source === "github" && ["full", "truncated"].includes(world.coverage?.tree) &&
-    Array.isArray(world.nodes) && world.nodes.length > 0 && world.nodes.length <= 100 && Array.isArray(world.edges) && world.edges.length <= 256 && !!world.blueprint;
+    worldShapeValid(world) && world.nodes.length > 0;
 }
 export function safeDirectory(path: string) {
   return typeof path === "string" && path.length > 0 && path.length <= 512 && !/[\\\u0000-\u001f\u007f%?#]/.test(path) &&
     path.split("/").every(s => s !== "" && s !== "." && s !== "..");
 }
 export function recordedNodeSource(world: WorldSnapshot, node: WorldNode): string | null {
-  if (!safeDirectory(node.path) || !node.id || node.id.startsWith("coverage:") || /[\u0000-\u001f]/.test(node.id) || !Array.isArray(node.evidence)) return null;
+  if (!worldIdentity(world) || !node || typeof node.id !== "string" || !safeDirectory(node.path) || !node.id || node.id.startsWith("coverage:") || /[\u0000-\u001f]/.test(node.id) || !Array.isArray(node.evidence)) return null;
   const expected = `${world.repo.url}/tree/${world.headSha}/${node.path.split("/").map(encodeURIComponent).join("/")}`;
   return node.evidence.includes(expected) ? expected : null;
 }

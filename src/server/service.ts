@@ -122,7 +122,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
   const listFeatured = async (): Promise<FeaturedProject[]> => {
     const keys = CURATED_PROJECTS.map((project) => project.fullName.toLowerCase());
     const summaries = options.store.summaries ? await options.store.summaries(keys, now()) :
-      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now()); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
+      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now(), { readOnly: true }); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
     const byKey = new Map(summaries.map((row) => [row.key, row]));
     return CURATED_PROJECTS.map((project) => {
       const cached = byKey.get(project.fullName.toLowerCase());
