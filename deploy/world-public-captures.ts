@@ -145,6 +145,11 @@ export class D1PublicCaptureCore {
     });
   }
   async inspect(generation: RemoteWorldGeneration) { return this.run(async db => { const g = await this.authenticate(await this.state(db), generation); return { status: g[5], operationHash: g[6], acceptedSequence: g[9] }; }); }
+  /** Read-only RPC preflight/identity and drain assertions. These never mint,
+   * consume, repair or return keys/private target lists. */
+  async status() { return this.run(async db => { const s = await this.state(db), a = s.view[0][0]!; return { identity: { databaseId: a[2], bindingNonce: a[3], epoch: a[4] }, protocol: 1 as const, revision: a[7], sequence: a[6], worlds: s.view[4].length, aliases: s.view[5].length, generations: s.view[3].length }; }); }
+  async assert(generation: RemoteWorldGeneration) { return this.run(async db => { const s = await this.state(db), g = await this.authenticate(s, generation); if (g[5] !== "active") return conflict(); this.admitted(s, [g[1], g[2], this.resolve(s, g[1])], g); return { admitted: true as const }; }); }
+  async privacyStatus(generation: RemoteWorldGeneration) { return this.run(async db => { const s = await this.state(db), g = await this.authenticate(s, generation); if (!["deny-pending", "denied"].includes(g[5]) || list(g[8], 204).some(k => !s.view[2].some(b => b[0] === k && b[1] === g[9] && b[2] === 1))) return { barrier: "unknown" as const, cleanup: "unconfirmed" as const }; return { barrier: "confirmed" as const, cleanup: g[5] === "denied" ? "confirmed" as const : "unconfirmed" as const }; }); }
   async get(input: string) {
     const repo = captureKey(input);
     return this.run(async db => {
