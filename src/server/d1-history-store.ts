@@ -82,8 +82,8 @@ export class D1RpcHistoryStore implements HistoryStore {
     const track = <T>(p: Promise<T>) => { call.pending.add(p); p.then(() => { call.pending.delete(p); release(); }, () => { call.pending.delete(p); release(); }); return p; };
     const abort = new AbortController(); let dispatched = false, last = NaN, started = NaN, reader: ReadableStreamDefaultReader<Uint8Array> | undefined, response: Response | undefined, cancelling = false;
     const check = () => { const n = this.clock(); if (!Number.isFinite(n) || !Number.isFinite(started) || n < last || n - started >= this.limits.timeoutMs || abort.signal.aborted) throw new Error("History RPC deadline."); last = n; };
-    const cancelled = (r = response) => { if (cancelling || !r?.body) return; cancelling = true; try { track(Promise.resolve(reader ? reader.cancel() : r.body.cancel())); } catch (e) { track(Promise.reject(e)); } };
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    const cancelled = (r = response) => { if (cancelling || !r) return; try { if (!r.body) return; cancelling = true; track(Promise.resolve(reader ? reader.cancel() : r.body.cancel())); } catch (e) { cancelling = true; track(Promise.reject(e)); } };
+    let timer: ReturnType<typeof setTimeout> | undefined, validatedError: HistoryRpcStoreError | undefined;
     try {
       started = last = operationStarted; check();
       const timeout = new Promise<never>((_, fail) => { timer = setTimeout(() => { abort.abort(); fail(new Error("History RPC deadline.")); }, Math.max(1, this.limits.timeoutMs - (last - started))); });
@@ -99,15 +99,18 @@ export class D1RpcHistoryStore implements HistoryStore {
       if (wire.ok === false) {
         if (!keys(wire, ["ok", "backend", "op", "identity", "schemaVersion", "code", "error", "writeOutcome"]) || !rejectionCodes.has(wire.code) || typeof wire.error !== "string" || !["not-started", "unknown"].includes(wire.writeOutcome) || response.status < 400 || response.status > 599) return invalid();
         this.identity(wire.identity, false); check();
-        if (op.op === "historyAppend" && (wire.writeOutcome === "unknown" || wire.code === "HISTORY_WRITE_OUTCOME_UNKNOWN")) throw new HistoryRpcStoreError("HISTORY_WRITE_OUTCOME_UNKNOWN", 503, "unknown");
+        if (op.op === "historyAppend" && (wire.writeOutcome === "unknown" || wire.code === "HISTORY_WRITE_OUTCOME_UNKNOWN")) { validatedError = new HistoryRpcStoreError("HISTORY_WRITE_OUTCOME_UNKNOWN", 503, "unknown"); throw validatedError; }
         if (wire.code === "HISTORY_WRITE_OUTCOME_UNKNOWN") return invalid();
         if (wire.writeOutcome !== "not-started") return invalid();
-        throw new HistoryRpcStoreError(wire.code, response.status, "not-started");
+        validatedError = new HistoryRpcStoreError(wire.code, response.status, "not-started"); throw validatedError;
       }
       if (wire.ok !== true || !response.ok || !keys(wire, ["ok", "backend", "op", "identity", "schemaVersion", "result", ...(op.op === "historyFrame" && wire.result?.status === "available" ? ["proofCommit"] : [])])) return invalid();
       this.identity(wire.identity, op.op === "historyAppend"); check(); const value = this.result(op, wire, check); check(); return value;
     } catch (e) {
-      if (e instanceof HistoryRpcStoreError) throw e;
+      // Only THIS response's fully verified rejection can carry application
+      // status/outcome. Transport/stream/clock may throw this exported class or
+      // replay an older genuine error; neither proves current wire provenance.
+      if (validatedError !== undefined && e === validatedError) throw validatedError;
       throw new HistoryRpcStoreError(op.op === "historyAppend" && dispatched ? "HISTORY_WRITE_OUTCOME_UNKNOWN" : "HISTORY_STORAGE_UNAVAILABLE", 503, op.op === "historyAppend" && dispatched ? "unknown" : "not-started");
     } finally { clearTimeout(timer); abort.abort(); cancelled(); call.finished = true; release(); }
   }

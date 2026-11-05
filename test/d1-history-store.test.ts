@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
-import { D1RpcHistoryStore, type HistoryRpcStoreConfig } from "../src/server/d1-history-store";
+import { D1RpcHistoryStore, HistoryRpcStoreError, type HistoryRpcStoreConfig } from "../src/server/d1-history-store";
 import { HISTORY_RPC_URL, HISTORY_SCHEMA3_SQL_SHA256 } from "../src/server/history-rpc-contract";
 import { historyStorageRpc, type HistoryRpcEnvironment } from "../deploy/history-rpc";
 import type { HistoryD1Binding } from "../deploy/history-storage";
@@ -165,4 +165,55 @@ test("SYNTHETIC actual RPC-backed service/HTTP roundtrip and lost commit acknowl
     expect(lostFrame).toMatchObject({ status: "save-unconfirmed", token: null, persisted: { commits: 0, frames: 0, batches: 0, cursor: frames.persisted.cursor }, unconfirmed: { kind: "frames", commits: 0, frames: 1, writeOutcome: "unknown" } });
     expect(requests).toBe(6); expect(collections).toBe(4);
   } finally { f.db.close(); }
+});
+
+test("SYNTHETIC typed fetch/stream exceptions after actual commit remain UNKNOWN and cannot leak application status/header canaries", async () => {
+  for (const boundary of ["fetch", "stream", "body-access"] as const) {
+    const f = fixture(), injected = new HistoryRpcStoreError("history-revision-conflict", 409, "not-started"); injected.message = `SYNTHETIC SQL/HEADER:${secret}`;
+    try {
+      f.intercept(async (_r, actual) => { await actual(); if (boundary === "fetch") throw injected; if (boundary === "body-access") { const r = json({}); Object.defineProperty(r, "body", { get() { throw injected; } }); return r; } return new Response(new ReadableStream({ start(c) { c.error(injected); } }), { headers: { "content-type": "application/json" } }); });
+      let error: any; try { await f.store.append(batch()); } catch (e) { error = e; }
+      expect(error).not.toBe(injected); expect(error).toMatchObject({ code: "HISTORY_WRITE_OUTCOME_UNKNOWN", status: 503, writeOutcome: "unknown" }); expect(error.message).not.toContain(secret); expect(error.message).not.toContain("HEADER");
+      expect(f.db.query("SELECT * FROM history_commits").all()).toHaveLength(1); expect(f.batches).toBe(1); expect(f.calls).toHaveLength(1);
+      await f.store.observeSettlement().settled; expect(f.store.observeSettlement().idle).toBe(true);
+      f.intercept(undefined); expect((await f.store.page(anchor(1))).commits).toHaveLength(1);
+    } finally { f.db.close(); }
+  }
+});
+
+test("SYNTHETIC typed errors before a response and reused prior verified rejections never establish current invocation provenance", async () => {
+  const f = fixture();
+  try {
+    const injected = new HistoryRpcStoreError("history-revision-conflict", 409, "not-started"); f.intercept(() => { throw injected; });
+    await expect(f.store.append(batch())).rejects.toMatchObject({ code: "HISTORY_WRITE_OUTCOME_UNKNOWN", status: 503, writeOutcome: "unknown" }); expect(f.batches).toBe(0); expect(f.calls).toHaveLength(1);
+    await expect(f.store.page(anchor(1))).rejects.toMatchObject({ code: "HISTORY_STORAGE_UNAVAILABLE", status: 503, writeOutcome: "not-started" });
+    f.intercept(undefined); const saved = await f.store.append(batch()); let old: any;
+    try { await f.store.append({ ...batch(1, saved.currentCursor, "conflict"), unit: { kind: "commits", complete: true, commits: [{ ...commit(1), message: "conflict" }] } }); } catch (e) { old = e; }
+    expect(old).toMatchObject({ code: "immutable-commit-conflict", status: 409, writeOutcome: "not-started" });
+    const before = f.calls.length; f.intercept(async (_r, actual) => { await actual(); throw old; });
+    const next = { ...batch(2, undefined, "new_generation"), anchor: { ...anchor(2), generation: "SYNTHETIC_new_generation" } };
+    let replayed: any; try { await f.store.append(next); } catch (e) { replayed = e; }
+    expect(replayed).not.toBe(old); expect(replayed).toMatchObject({ code: "HISTORY_WRITE_OUTCOME_UNKNOWN", status: 503, writeOutcome: "unknown" }); expect(f.calls.length - before).toBe(1); expect(f.batches).toBe(2); expect(f.db.query("SELECT * FROM history_commits").all()).toHaveLength(2);
+  } finally { f.db.close(); }
+  let ticks = 0; const timed = fixture({}, () => { if (++ticks >= 4) throw new HistoryRpcStoreError("history-revision-conflict", 409, "not-started"); return 0; });
+  try { await expect(timed.store.append(batch())).rejects.toMatchObject({ code: "HISTORY_WRITE_OUTCOME_UNKNOWN", status: 503, writeOutcome: "unknown" }); expect(timed.batches).toBe(1); expect(timed.db.query("SELECT * FROM history_commits").all()).toHaveLength(1); }
+  finally { timed.db.close(); }
+});
+
+test("SYNTHETIC actual HTTP typed fetch/stream post-commit loss reports save-unconfirmed and later GET sees real facts", async () => {
+  for (const boundary of ["fetch", "stream"] as const) {
+    const f = fixture();
+    try {
+      const world = syntheticWorld(); world.source = "github"; world.headSha = sha(1); world.coverage.tree = "full"; world.health.github = "ok";
+      const key = new HistoryCursorCodec(await crypto.subtle.importKey("raw", new Uint8Array(32).fill(29), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]));
+      const origin = "https://synthetic.invalid", path = `/prefix/api/history/${repo}`, ctx = { repo, path, publicOrigin: origin };
+      const handle = createHistoryHttp({ authenticate: () => ({ gatewayAuthenticated: true, requestAdmitted: true, identity: "a".repeat(64), admitCollection() {} }), lifecycle: { held: () => false, run: work => work(p => { void p.catch(() => {}); }) }, revokePublicCapture() {}, makeService: admission => new HistoryService({ ...admission, store: f.store, cache: { get: async () => ({ world, fresh: true, expiresAt: 0 }) }, cursor: key, now: () => Date.parse("2026-11-05T00:00:00Z"), reader: { quota: { take() {} }, wallNow: () => "2026-11-04T18:00:00Z", fetcher: async input => String(input).endsWith(`/repos/${repo}`) ? json({ private: false, visibility: "public", full_name: repo, license: null }) : json({ sha: sha(1), tree: { sha: sha(1001) }, parents: [], message: "SYNTHETIC", author: { date: null }, committer: { date: null } }) } }) });
+      const request = (body?: unknown) => new Request(origin + path, { method: body ? "POST" : "GET", headers: { origin, "content-type": "application/json" }, ...(body ? { body: JSON.stringify(body) } : {}) });
+      const first = await (await handle(request(), ctx)).json();
+      f.intercept(async (_r, actual, op) => { const response = await actual(); if (op.op !== "historyAppend") return response; const error = new HistoryRpcStoreError("history-revision-conflict", 409, "not-started"); error.message = secret; if (boundary === "fetch") throw error; return new Response(new ReadableStream({ start(c) { c.error(error); } }), { headers: { "content-type": "application/json" } }); });
+      const r = await handle(request({ action: "walk", cursor: first.token }), ctx), result = await r.json();
+      expect(r.status).toBe(503); expect(result).toMatchObject({ status: "save-unconfirmed", token: null, persisted: { commits: 0, frames: 0, batches: 0 }, unconfirmed: { kind: "commits", commits: 1, writeOutcome: "unknown" }, error: { code: "HISTORY_WRITE_OUTCOME_UNKNOWN" } }); expect(JSON.stringify(result)).not.toContain(secret); expect(f.batches).toBe(1); expect(f.calls.filter(c => c.body.op === "historyAppend")).toHaveLength(1);
+      f.intercept(undefined); const read = await (await handle(request(), ctx)).json(); expect(read.history.commits).toHaveLength(1); expect(read.history.cursor.revision).toBe(1);
+    } finally { f.db.close(); }
+  }
 });
