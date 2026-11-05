@@ -92,8 +92,11 @@ export class D1HistoryStore implements HistoryStore {
       if (!record(a) || !fields(a as unknown as Record<string, unknown>, ["anchor", "cursor", "members"]) || !validHistoryCursor(a.cursor) || !Array.isArray(a.members) || a.members.length > this.limits.commits || new Set(a.members).size !== a.members.length || a.members.some(s => !state.commits.has(s))) return corrupt();
       const anchor = historyAnchor(a.anchor);
       if (anchor.repoKey !== repo || key(anchor) !== r.anchor_key || anchor.generation !== r.generation || a.cursor.retainedCommits !== a.members.length) return corrupt();
-      const spine = unwrap(firstParentSpine(anchor, a.members.map(s => state.commits.get(s)!)));
-      if (json(spine.commits.map(c => c.sha)) !== json(a.members) || spine.nonSpineShas.length) return corrupt();
+      const facts = a.members.map(s => state.commits.get(s)!), spine = firstParentSpine(anchor, facts);
+      if (!spine.ok || json(spine.value.commits.map(c => c.sha)) !== json(a.members) || spine.value.nonSpineShas.length) return corrupt();
+      // Shape and byte counts cannot establish cursor truth: a same-size wrong
+      // parent hash (or false root/coverage state) must never be published.
+      if (json(cursorValue(a.cursor)) !== json(historyCursor(anchor, facts, a.cursor.revision))) return corrupt();
       state.anchors.set(r.anchor_key, a);
     }
     const manifests = await this.all<Manifest>(db, "SELECT frame_key,commit_sha,chunk_count,payload_bytes,payload_hash FROM history_frames WHERE repo=? ORDER BY frame_key LIMIT 9", [repo], this.limits.frames);
@@ -194,6 +197,19 @@ export class D1HistoryStore implements HistoryStore {
       } else acceptedCursor = { ...current, revision: current.revision + 1 };
       for (const [sha, c] of changedCommits) s.commits.set(sha, c);
       s.anchors.set(anchorKey, { anchor, cursor: acceptedCursor, members });
+      const changedAnchors = new Map([[anchorKey, s.anchors.get(anchorKey)!]]);
+      // Facts are shared, membership is not. A null->observed parent refinement
+      // changes the cursor of every retained window that ends at that fact.
+      // Refresh only changed semantics, atomically with the facts; never extend
+      // another generation's membership or rewrite historical batch receipts.
+      for (const [otherKey, other] of s.anchors) {
+        if (otherKey === anchorKey || !other.members.some(sha => changedCommits.has(sha))) continue;
+        const facts = other.members.map(sha => s.commits.get(sha)!);
+        const derived = historyCursor(other.anchor, facts, other.cursor.revision);
+        if (json(derived) === json(cursorValue(other.cursor))) continue;
+        const refreshed = { ...other, cursor: { ...derived, revision: other.cursor.revision + 1 } };
+        s.anchors.set(otherKey, refreshed); changedAnchors.set(otherKey, refreshed);
+      }
       const changedFrames = new Map<string, { frame: ImmutableTreeFrame; pieces: string[]; manifest: Manifest }>();
       for (const f of normalizedFrames) {
         const frameKey = topologyFrameKey(f), c = s.commits.get(f.commitSha)!, old = s.manifests.get(frameKey);
@@ -224,7 +240,7 @@ export class D1HistoryStore implements HistoryStore {
         COALESCE((SELECT payload FROM history_anchors WHERE repo=? AND anchor_key=?),'')=?
         THEN 1 ELSE 0 END`, repo, repo, Math.max(0, oldRepoRevision), repo, anchorKey, oldAnchorPayload ?? "");
       for (const [sha, c] of changedCommits) add("INSERT INTO history_commits(repo,sha,payload) VALUES(?,?,?) ON CONFLICT(repo,sha) DO UPDATE SET payload=excluded.payload", repo, sha, json(c));
-      add("INSERT INTO history_anchors(repo,anchor_key,generation,payload) VALUES(?,?,?,?) ON CONFLICT(repo,anchor_key) DO UPDATE SET payload=excluded.payload", repo, anchorKey, anchor.generation, json(s.anchors.get(anchorKey)));
+      for (const [changedKey, changed] of changedAnchors) add("INSERT INTO history_anchors(repo,anchor_key,generation,payload) VALUES(?,?,?,?) ON CONFLICT(repo,anchor_key) DO UPDATE SET payload=excluded.payload", repo, changedKey, changed.anchor.generation, json(changed));
       for (const [frameKey, f] of changedFrames) {
         add("DELETE FROM history_frame_chunks WHERE repo=? AND frame_key=?", repo, frameKey);
         add("INSERT INTO history_frames(repo,frame_key,commit_sha,chunk_count,payload_bytes,payload_hash) VALUES(?,?,?,?,?,?) ON CONFLICT(repo,frame_key) DO UPDATE SET chunk_count=excluded.chunk_count,payload_bytes=excluded.payload_bytes,payload_hash=excluded.payload_hash", repo, frameKey, f.manifest.commit_sha, f.manifest.chunk_count, f.manifest.payload_bytes, f.manifest.payload_hash);

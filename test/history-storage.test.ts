@@ -330,3 +330,152 @@ test("SYNTHETIC authoritative read/batch errors fail closed with no fallback or 
     await expect(b.store.page(a)).rejects.toMatchObject({ code: "history-storage-unavailable" });
   } finally { b.db.close(); }
 });
+
+async function overlappingWindows(b: ReturnType<typeof fixture>) {
+  const older = anchor(2, "older"), overlap = anchor(3, "overlap"), unrelated = anchor(8, "unrelated"), selected = anchor(4, "selected");
+  const oldBatch = append(older, [commit(2, null)], undefined, "old");
+  const old = await b.store.append(oldBatch);
+  const shared = await b.store.append(append(overlap, [commit(3, [2]), commit(2, null)], undefined, "overlap"));
+  const unaffected = await b.store.append(append(unrelated, [commit(8)], undefined, "unrelated"));
+  const batch = append(selected, [commit(4, [3]), commit(3, [2]), commit(2, [1]), commit(1)], undefined, "refine");
+  return { older, overlap, unrelated, selected, oldBatch, old, shared, unaffected, batch };
+}
+
+test("SYNTHETIC shared parent refinement atomically refreshes overlapping cursors without extending other memberships or changing receipts", async () => {
+  const b = fixture();
+  try {
+    const w = await overlappingWindows(b);
+    const receipts = b.db.query("SELECT payload FROM history_batches ORDER BY rowid").all();
+    const unrelatedBefore = b.db.query("SELECT payload FROM history_anchors WHERE generation='unrelated'").get();
+    await b.store.append(w.batch);
+    const a = await b.store.page(w.older), overlap = await b.store.page(w.overlap);
+    expect(a.commits.map(c => c.sha)).toEqual([sha(2)]); expect(a.commits[0]!.parents).toEqual([sha(1)]);
+    expect(a.cursor).toEqual({ revision: 2, retainedCommits: 1, nextParentSha: sha(1), reachedRoot: null, termination: "missing-parent" });
+    expect(overlap.commits.map(c => c.sha)).toEqual([sha(3), sha(2)]); expect(overlap.cursor).toEqual({ ...a.cursor, retainedCommits: 2 });
+    expect((await b.store.page(w.selected)).cursor).toMatchObject({ retainedCommits: 4, reachedRoot: true });
+    expect(a.retention).toMatchObject({ commits: 5, memberships: 8, anchors: 4, receipts: 4 });
+    expect(b.db.query("SELECT payload FROM history_batches ORDER BY rowid LIMIT 3").all()).toEqual(receipts);
+    expect(b.db.query("SELECT payload FROM history_anchors WHERE generation='unrelated'").get()).toEqual(unrelatedBefore);
+    expect((await b.store.page(w.unrelated)).cursor).toEqual(w.unaffected.currentCursor);
+    const retry = await b.store.append(w.oldBatch);
+    expect(retry).toMatchObject({ idempotent: true, acceptedCursor: w.old.currentCursor, currentCursor: a.cursor });
+    await rejectedUnchanged(b, append(w.older, [commit(1)], w.old.currentCursor, "stale_inflight"), "history-revision-conflict");
+    await rejectedUnchanged(b, append(w.overlap, [commit(1)], w.shared.currentCursor, "stale_overlap"), "history-revision-conflict");
+    await b.store.append(append(w.older, [commit(1)], a.cursor, "explicit_resume"));
+    expect((await b.store.page(w.older)).cursor).toMatchObject({ revision: 3, retainedCommits: 2, reachedRoot: true });
+    // Even when the parent is globally cached, a different window must accept
+    // its own explicit complete unit before gaining that membership.
+    expect((await b.store.page(w.overlap)).cursor).toEqual(overlap.cursor);
+  } finally { b.db.close(); }
+});
+
+test("SYNTHETIC shared unknown->observed root refines root semantics but metadata/provenance-only changes never bump dependent windows", async () => {
+  for (const rootObserved of [true, false]) {
+    const b = fixture(), older = anchor(2, "older"), newer = anchor(3, "newer"), unknown = { ...commit(2, null), authorAt: null };
+    try {
+      const old = await b.store.append(append(older, [unknown], undefined, "old"));
+      const refined = { ...commit(2, rootObserved ? [] : null), provenance: [{ ...unknown.provenance[0]!, fetchedAt: "2026-11-02T00:00:00Z" }] };
+      const saved = await b.store.append(append(newer, [commit(3, [2]), refined], undefined, "new"));
+      const a = await b.store.page(older); expect(a.commits).toHaveLength(1); expect(a.commits[0]!.authorAt).toBe("original author clock"); expect(a.commits[0]!.provenance).toHaveLength(2);
+      expect(a.cursor).toEqual(rootObserved ? { ...old.currentCursor, revision: 2, reachedRoot: true, termination: "observed-root" } : old.currentCursor);
+      const before = b.db.query("SELECT payload FROM history_anchors WHERE generation='older'").get();
+      await b.store.append(append(newer, [{ ...refined, provenance: [{ ...refined.provenance[0]!, fetchedAt: "2026-11-03T00:00:00Z" }] }], saved.currentCursor, "provenance_only"));
+      expect(b.db.query("SELECT payload FROM history_anchors WHERE generation='older'").get()).toEqual(before);
+      expect((await b.store.page(older)).cursor).toEqual(a.cursor); expect((await b.store.page(older)).commits[0]!.provenance).toHaveLength(3);
+    } finally { b.db.close(); }
+  }
+});
+
+test("SYNTHETIC EVERY affected-anchor write interruption boundary rolls back shared facts, all cursors, receipts and byte counts together", async () => {
+  const probe = fixture(), w = await overlappingWindows(probe);
+  await probe.store.append(w.batch); const count = probe.options.lastStatements!; probe.db.close();
+  for (let interruption = 0; interruption <= count; interruption++) {
+    const b = fixture();
+    try {
+      const state = await overlappingWindows(b); b.options.interrupt = interruption;
+      await rejectedUnchanged(b, state.batch, "history-storage-unavailable");
+      expect((await b.store.page(state.older)).cursor).toEqual(state.old.currentCursor);
+      expect((await b.store.page(state.older)).commits[0]!.parents).toBeNull();
+      expect((await b.store.page(state.overlap)).cursor).toEqual(state.shared.currentCursor);
+      expect((await b.store.page(state.selected)).status).toBe("missing-anchor");
+    } finally { b.db.close(); }
+  }
+});
+
+test("SYNTHETIC dependent cursor byte changes count toward atomic capacity, with exact boundary accepted and no membership expansion", async () => {
+  const probe = fixture(), w = await overlappingWindows(probe);
+  const result = await probe.store.append(w.batch), exact = result.retention.normalizedBytes; probe.db.close();
+  for (const limit of [exact - 1, exact]) {
+    const b = fixture();
+    try {
+      const state = await overlappingWindows(b), before = b.dump(), limited = new D1HistoryStore(b.binding, { bytes: limit });
+      if (limit < exact) {
+        await expect(limited.append(state.batch)).rejects.toMatchObject({ code: "history-byte-cap" }); expect(b.dump()).toBe(before);
+      } else {
+        expect((await limited.append(state.batch)).retention.normalizedBytes).toBe(exact);
+        expect((await limited.page(state.older)).cursor.retainedCommits).toBe(1);
+        expect((await limited.page(state.overlap)).cursor.retainedCommits).toBe(2);
+      }
+    } finally { b.db.close(); }
+  }
+});
+
+test("SYNTHETIC stored cursor fields must all agree with retained facts; corruption fails closed without deletion or repair", async () => {
+  const patches = [
+    { nextParentSha: sha(99) }, { nextParentSha: null }, { reachedRoot: true }, { termination: "parents-unobserved" },
+    { termination: "observed-root" }, { termination: "window-cap" }, { retainedCommits: 0 },
+  ];
+  for (const patch of patches) {
+    const b = fixture(), a = anchor(2);
+    try {
+      const saved = await b.store.append(append(a, [commit(2, [1])]));
+      const row = b.db.query("SELECT payload FROM history_anchors").get() as { payload: string }, value = JSON.parse(row.payload);
+      value.cursor = { ...value.cursor, ...patch }; const changed = JSON.stringify(value);
+      b.db.query("UPDATE history_anchors SET payload=?").run(changed);
+      // Keep normalized byte accounting consistent so semantic checks must do
+      // the work, including the same-length wrong-SHA and false-root cases.
+      b.db.query("UPDATE history_repositories SET normalized_bytes=normalized_bytes+?").run(new TextEncoder().encode(changed).length - new TextEncoder().encode(row.payload).length);
+      const before = b.dump();
+      await expect(b.store.page(a)).rejects.toMatchObject({ code: "history-storage-unavailable" });
+      await expect(b.store.frame(a, topologyFrameKey(frame(commit(2, [1]))))).rejects.toMatchObject({ code: "history-storage-unavailable" });
+      await expect(b.store.append(append(a, [commit(1)], saved.currentCursor, "resume"))).rejects.toMatchObject({ code: "history-storage-unavailable" });
+      expect(b.dump()).toBe(before);
+    } finally { b.db.close(); }
+  }
+});
+
+test("SYNTHETIC an already in-flight old action cannot commit after another generation refreshes its cursor", async () => {
+  const b = fixture(), older = anchor(2, "older"), newer = anchor(3, "newer");
+  try {
+    const saved = await b.store.append(append(older, [commit(2, null)], undefined, "old"));
+    let entered!: () => void, release!: () => void, hold = true;
+    const waiting = new Promise<void>(resolve => { entered = resolve; }), gate = new Promise<void>(resolve => { release = resolve; });
+    b.options.beforeBatch = () => { if (hold) { hold = false; entered(); return gate; } };
+    const inflight = b.store.append(appendFrames(older, [frame(commit(2, null))], saved.currentCursor, "inflight"));
+    // Attach the rejection observer before releasing the synthetic transaction.
+    const outcome = inflight.then(value => ({ value, error: null }), error => ({ value: null, error }));
+    await waiting;
+    await b.store.append(append(newer, [commit(3, [2]), commit(2, [1]), commit(1)], undefined, "new"));
+    const afterWinner = b.dump(); release();
+    expect((await outcome).error).toMatchObject({ code: "history-storage-unavailable" }); expect(b.dump()).toBe(afterWinner);
+    expect((await b.store.page(older)).cursor).toMatchObject({ revision: 2, nextParentSha: sha(1) });
+    expect(await b.store.frame(older, topologyFrameKey(frame(commit(2, [1]))))).toEqual({ status: "missing-frame" });
+  } finally { b.db.close(); }
+});
+
+test("SYNTHETIC shared refinement at the 500-member boundary changes coverage to window-cap without adding a parent", async () => {
+  const b = fixture(), older = anchor(501, "full_window"), newer = anchor(2, "refining_window"); let cursor = historyCursor(older, [], 0);
+  try {
+    for (let n = 501; n >= 2; n -= 4) {
+      const facts = Array.from({ length: Math.min(4, n - 1) }, (_, i) => commit(n - i, n - i === 2 ? null : [n - i - 1]));
+      cursor = (await b.store.append(append(older, facts, cursor, `load_${n}`))).currentCursor;
+    }
+    expect(cursor).toMatchObject({ retainedCommits: 500, termination: "parents-unobserved", nextParentSha: null });
+    await b.store.append(append(newer, [commit(2, [1])], undefined, "refine_boundary"));
+    const page = await b.store.page(older, 450);
+    expect(page.cursor).toEqual({ ...cursor, revision: cursor.revision + 1, termination: "window-cap", nextParentSha: sha(1) });
+    expect(page.retention.commits).toBe(500); expect(page.retention.memberships).toBe(501); expect(page.commits).toHaveLength(50);
+    expect((await b.store.page(newer)).cursor).toMatchObject({ retainedCommits: 1, nextParentSha: sha(1), termination: "missing-parent" });
+    expect(b.db.query("SELECT sha FROM history_commits WHERE sha=?").get(sha(1))).toBeNull();
+  } finally { b.db.close(); }
+});
