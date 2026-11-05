@@ -89,15 +89,17 @@ test("SYNTHETIC D1 snapshot/alias roundtrip preserves raw evidence, head, expiry
   } finally { b.db.close(); }
 });
 
-test("SYNTHETIC D1 rejects demo/unknown license/invalid TTL, and an older writer cannot replace newer evidence", async () => {
+test("SYNTHETIC D1 rejects demo/invalid TTL while admitting unknown license and preserving newer evidence", async () => {
   const b = binding(), world = fixture();
   try {
-    for (const mutate of [(w: typeof world) => { w.source = "demo"; }, (w: typeof world) => { w.repo.license = null; }, (w: typeof world) => { w.headSha = "forged"; }]) {
+    for (const mutate of [(w: typeof world) => { w.source = "demo"; }, (w: typeof world) => { w.headSha = "forged"; }]) {
       const invalid = structuredClone(world); mutate(invalid);
       expect((await b.rpc({ op: "put", snapshot: JSON.stringify(invalid), savedAt: now, expiresAt: now + 90_000 })).status).toBe(400);
     }
     expect((await b.rpc({ op: "put", snapshot: JSON.stringify(world), savedAt: now, expiresAt: now + 1 })).status).toBe(400);
+    world.repo.license = null;
     await b.store.put(world, 90_000, now + 10);
+    expect((await b.store.get(world.repo.fullName))?.world.repo.license).toBeNull();
     const older = structuredClone(world); older.headSha = "a".repeat(40);
     await expect(b.store.put(older, 90_000, now)).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE" });
     expect((await b.store.get(world.repo.fullName))?.world.headSha).toBe(world.headSha);

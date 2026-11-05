@@ -3,7 +3,7 @@ import type { WorldNode, WorldEdge } from "../contracts";
 /** Cache-only public facts. No model blueprint, issue bodies or runtime configuration. */
 export interface RepositoryPreviewData {
   state: "cached" | "stale" | "unknown" | "unavailable";
-  reason: "cache-miss" | "license-unverified" | "source-unverified" | "tree-unavailable" | null;
+  reason: "cache-miss" | "source-unverified" | "tree-unavailable" | null;
   fullName: string;
   headSha: string | null;
   collectedAt: string | null;

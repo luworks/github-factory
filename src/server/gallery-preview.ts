@@ -2,7 +2,6 @@ import type { WorldSnapshot } from "../contracts";
 import type { RepositoryPreviewData } from "../gallery/contracts";
 import { parseRepo } from "./github";
 
-import { isOpenSourceLicense } from "./open-source";
 
 export function projectRepositoryPreview(input: string, world: WorldSnapshot | null, now = Date.now()): RepositoryPreviewData {
   const fullName = parseRepo(input).fullName;
@@ -13,7 +12,6 @@ export function projectRepositoryPreview(input: string, world: WorldSnapshot | n
   if (!world) return empty;
   if (world.source !== "github" || world.repo.fullName.toLowerCase() !== fullName.toLowerCase())
     return { ...empty, reason: "source-unverified" };
-  if (!isOpenSourceLicense(world.repo.license)) return { ...empty, reason: "license-unverified" };
   const captured = Date.parse(world.collectedAt);
   const validTime = Number.isFinite(captured) && captured <= now && Number.isFinite(world.refreshAfter);
   const stale = !validTime || world.refreshAfter <= now || world.coverage.notes.some((note) => /\bSTALE\b/.test(note));

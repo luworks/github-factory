@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { CURATED_PROJECTS } from "../src/catalog";
 import { LandingPage } from "../src/components/LandingPage";
 
-test("curation retains editorial identities except the known custom-licensed Llama repository", () => {
+test("curation keeps its nineteen editorial identities without expanding on policy changes", () => {
   expect(CURATED_PROJECTS.map((project) => project.fullName)).toEqual([
     "openclaw/openclaw",
     "pingdotgg/t3code",

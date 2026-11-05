@@ -16,13 +16,13 @@ test("SYNTHETIC cache miss performs exactly one cache lookup and returns no inve
   expect(reads).toBe(1);
   expect(result).toMatchObject({ state: "unknown", reason: "cache-miss", nodes: [], edges: [], headSha: null });
 });
-test("SYNTHETIC demo, mismatched identity, custom Llama and unknown licenses fail closed", () => {
+test("SYNTHETIC demo and mismatched identity fail closed; public unknown/custom licenses remain metadata", () => {
   const world = fixture();
   expect(projectRepositoryPreview(world.repo.fullName, syntheticWorld(), now).reason).toBe("source-unverified");
   expect(projectRepositoryPreview("other/repo", world, now).reason).toBe("source-unverified");
   for (const license of [null, "NOASSERTION", "Llama-3.1", "LicenseRef-Llama-3", "CC-BY-NC-4.0"]) {
     world.repo.license = license;
-    expect(projectRepositoryPreview(world.repo.fullName, world, now)).toMatchObject({ reason: "license-unverified", nodes: [], headSha: null });
+    expect(projectRepositoryPreview(world.repo.fullName, world, now)).toMatchObject({ state: "cached", reason: null, headSha: world.headSha });
   }
 });
 test("SYNTHETIC projection retains exact evidence states/head/time, strips model content and marks expiry", () => {

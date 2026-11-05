@@ -4,7 +4,6 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { ClientQuota, clientIdentity } from "../src/server/access";
 import { actionRequest, repositoryRequest } from "../src/server/http";
-import { requireOpenSourceLicense } from "../src/server/open-source";
 import { GitHubClient, parseRepo } from "../src/server/github";
 import { WorldStore } from "../src/server/store";
 import { createWorldService } from "../src/server/service";
@@ -90,25 +89,17 @@ test("public APIs accept only repository analysis schemas, never prompts or mode
   expect(() => actionRequest({}, "blueprint")).not.toThrow();
 });
 
-test.each([null, "NOASSERTION", "LicenseRef-Proprietary", "BUSL-1.1", "SSPL-1.0"])("unverified or non-open license is rejected before reading source (%s)", async (license) => {
+test.each([null, "NOASSERTION", "LicenseRef-Proprietary", "BUSL-1.1", "SSPL-1.0", "MIT"])("public metadata is admitted regardless of license (%s)", async (license) => {
   let requests = 0;
-  const client = new GitHubClient("", async () => { requests++; return Response.json({ private: false, visibility: "public", full_name: "example/project", default_branch: "main", license: { spdx_id: license } }); });
-  await expect(client.collect(parseRepo("example/project"))).rejects.toMatchObject({ code: "OPEN_SOURCE_REQUIRED", status: 403 });
-  expect(requests).toBe(1);
+  const client = new GitHubClient("", async () => { requests++; return requests === 1 ? Response.json({ private: false, visibility: "public", full_name: "example/project", default_branch: "main", license: { spdx_id: license } }) : new Response("Unavailable synthetic ref", { status: 409 }); });
+  await expect(client.collect(parseRepo("example/project"))).rejects.toMatchObject({ code: "EMPTY_REPO" });
+  expect(requests).toBe(2); // The public repository passed admission before the missing-ref evidence.
 });
 
-test("unknown license in a previously saved world cannot bypass collection gating", async () => {
-  const store = new WorldStore(":memory:"), world = syntheticWorld(); world.repo.license = null;
-  store.put(world);
+test("a real public cached snapshot with unknown licensing remains usable without collection", async () => {
+  const store = new WorldStore(":memory:"), world = syntheticWorld(); world.source = "github"; world.repo.license = null; store.put(world);
   let calls = 0;
   const service = createWorldService({ store, collector: { async collect() { calls++; throw new Error("must not collect"); } } });
-  try {
-    await expect(service.loadWorld(world.repo.fullName)).rejects.toMatchObject({ code: "OPEN_SOURCE_REQUIRED" });
-    await expect(service.getCachedWorld(world.repo.fullName)).rejects.toThrow("open-source");
-    expect(calls).toBe(0);
-  } finally { store.close(); }
-});
-
-test.each(["MIT", "Apache-2.0", "GPL-3.0-only", "BSD-3-Clause", "AGPL-3.0"])("recognized open-source SPDX is admitted (%s)", (license) => {
-  expect(() => requireOpenSourceLicense(license)).not.toThrow();
+  try { expect((await service.loadWorld(world.repo.fullName)).repo.license).toBeNull(); expect((await service.getCachedWorld(world.repo.fullName))?.repo.license).toBeNull(); expect(calls).toBe(0); }
+  finally { store.close(); }
 });

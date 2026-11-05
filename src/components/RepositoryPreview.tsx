@@ -171,7 +171,6 @@ export function RepositoryPreview({ fullName, style, lang, enabled = true }: { f
     : !data ? (near ? (zh ? "读取缓存中…" : "Loading cached map…") : (zh ? "等待预览" : "Preview pending"))
     : state === "stale" ? (zh ? "历史缓存 · 当前状态未知" : "Stale cache · current state unknown")
     : state === "cached" ? (zh ? "缓存快照" : "Cached snapshot")
-    : data.reason === "license-unverified" ? (zh ? "开源许可未核实" : "Open-source license unverified")
     : state === "unavailable" ? (zh ? "结构数据不可用" : "Structure unavailable")
     : (zh ? "未知 · 尚无缓存地图" : "Unknown · no cached map");
   return (

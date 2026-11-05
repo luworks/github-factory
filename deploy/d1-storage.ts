@@ -1,7 +1,6 @@
 import { assertIdentity, assertMigrationRows, sha256, validateExport, type MigrationData, type StorageIdentity } from "./migration-contract";
 import { isRenderableWorld } from "../src/server/world-readiness";
 import { parseRepo } from "../src/server/github";
-import { isOpenSourceLicense } from "../src/server/open-source";
 
 interface Statement {
   bind(...values: unknown[]): Statement;
@@ -104,7 +103,7 @@ export async function worldStorageRpc(request: Request, env: StorageEnvironment)
       if (!record(world) || !record(world.repo)) throw new TypeError();
       const repo = key(world.repo.fullName);
       if (world.schemaVersion !== 1 || world.source !== "github" || world.repo.url !== `https://github.com/${world.repo.fullName}` ||
-          !isOpenSourceLicense(world.repo.license) || (typeof world.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(world.headSha)) || (typeof world.collectedAt !== "string" || !Number.isFinite(Date.parse(world.collectedAt))) ||
+          (typeof world.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(world.headSha)) || (typeof world.collectedAt !== "string" || !Number.isFinite(Date.parse(world.collectedAt))) ||
           !Array.isArray(world.nodes) || world.nodes.length > 100 || !Array.isArray(world.edges) || world.edges.length > 256 || !world.blueprint || body.savedAt < 0 || body.expiresAt - body.savedAt < 60_000 || body.expiresAt - body.savedAt > 120_000) throw new TypeError();
       const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(body.snapshot)));
       const hash = [...digest].map((x) => x.toString(16).padStart(2, "0")).join("");

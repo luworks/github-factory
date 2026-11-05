@@ -1,5 +1,4 @@
 import { parseRepo } from "../src/server/github";
-import { isOpenSourceLicense } from "../src/server/open-source";
 export interface RawWorldRow { repo: string; snapshot: string; expires_at: number; saved_at: number }
 export interface WorldAlias { alias: string; canonical: string }
 export interface WorldExport { migrationId: string; sourceHead: string; sourceSha256: string; worlds: RawWorldRow[]; aliases: WorldAlias[] }
@@ -24,8 +23,7 @@ export function validateSnapshot(snapshot: string, repo?: string) {
   let w; try { w = JSON.parse(snapshot); } catch { throw new TypeError("Invalid snapshot"); }
   if (!isRecord(w) || !isRecord(w.repo)) throw new TypeError("Invalid snapshot");
   const canonical = repositoryKey(String(w.repo.fullName).toLowerCase());
-  if ((repo && canonical !== repo) || w.schemaVersion !== 1 || w.source !== "github" || w.repo.url !== `https://github.com/${w.repo.fullName}` || !isOpenSourceLicense(w.repo.license) ||
-    typeof w.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(w.headSha) || typeof w.collectedAt !== "string" || !Number.isFinite(Date.parse(w.collectedAt)) ||
+  if ((repo && canonical !== repo) || w.schemaVersion !== 1 || w.source !== "github" || w.repo.url !== `https://github.com/${w.repo.fullName}` || typeof w.headSha !== "string" || !/^[a-f0-9]{40}$/i.test(w.headSha) || typeof w.collectedAt !== "string" || !Number.isFinite(Date.parse(w.collectedAt)) ||
     !Array.isArray(w.nodes) || w.nodes.length > 100 || !Array.isArray(w.edges) || w.edges.length > 256 || !w.blueprint) throw new TypeError("Invalid snapshot");
   return canonical;
 }

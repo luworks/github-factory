@@ -85,7 +85,7 @@ export function repositoryRequest(body: Record<string, unknown>): string {
   if (Object.keys(body).some((key) => !["repo", "enrich"].includes(key)) || (body.enrich !== undefined && typeof body.enrich !== "boolean"))
     throw new HttpError(400, "REPOSITORY_INPUT_ONLY", "Only a GitHub repository URL and the explicit analysis choice are accepted.");
   if (typeof body.repo !== "string" || !/^https:\/\/github\.com\//i.test(body.repo))
-    throw new HttpError(400, "REPO_URL_REQUIRED", "Paste a public open-source HTTPS GitHub repository URL.");
+    throw new HttpError(400, "REPO_URL_REQUIRED", "Paste a public HTTPS GitHub repository URL.");
   parseRepo(body.repo);
   return body.repo;
 }

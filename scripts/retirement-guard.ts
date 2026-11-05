@@ -56,3 +56,9 @@ export function inspectSockets(pid: number, journalOutputVerified: boolean, read
   }
   return { activeSockets, unknownSockets, inboundSockets, allowedJournalInode };
 }
+export function requireFreshRetirementReceipt(receipt: { verifiedAtMs: number; expiresAtMs: number; identity: RetirementIdentity; verdict: ReturnType<typeof evaluateRetirement> }, expected: RetirementIdentity, current: RetirementObservation, now = Date.now()) {
+  if (!receipt || receipt.verifiedAtMs > now || receipt.expiresAtMs <= now || now - receipt.verifiedAtMs > 30_000 || receipt.expiresAtMs - receipt.verifiedAtMs > 30_000 ||
+    JSON.stringify(receipt.identity) !== JSON.stringify(expected) || receipt.verdict?.ready !== true) throw new Error("Retirement receipt stale or wrong process");
+  const verdict = evaluateRetirement(receipt.verdict.state, current, expected);
+  if (!verdict.ready) throw new Error("Retiring workload became active after receipt");
+}

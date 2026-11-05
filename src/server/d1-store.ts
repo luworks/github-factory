@@ -1,6 +1,5 @@
 import type { WorldSnapshot } from "../contracts";
 import { parseRepo, type Fetcher } from "./github";
-import { requireOpenSourceLicense } from "./open-source";
 import { WorldStorageError, type CachedWorld, type SnapshotStore, type WorldStorageStatus, type WorldSummary } from "./world-storage";
 
 type StoredRow = { key: string; repo: string; snapshot: string; expires_at: number; saved_at: number };
@@ -37,7 +36,7 @@ export class D1WorldStore implements SnapshotStore {
       if (world.schemaVersion !== 1 || world.source !== "github" || world.repo.fullName.toLowerCase() !== row.repo ||
           !/^[a-f0-9]{40}$/i.test(world.headSha) || !Number.isFinite(Date.parse(world.collectedAt)) ||
           !Array.isArray(world.nodes) || !Array.isArray(world.edges) || !world.blueprint || !Number.isSafeInteger(row.expires_at)) throw new WorldStorageError();
-      requireOpenSourceLicense(world.repo.license);
+
       return { world, expiresAt: row.expires_at, fresh: row.expires_at > now };
     } catch { throw new WorldStorageError(); }
   }
@@ -69,7 +68,7 @@ export class D1WorldStore implements SnapshotStore {
     return rows;
   }
   async put(world: WorldSnapshot, ttlMs = 90_000, now = Date.now()) {
-    requireOpenSourceLicense(world.repo.license);
+
     const result = await this.rpc<{ saved: boolean }>({ op: "put", snapshot: JSON.stringify(world), savedAt: now, expiresAt: now + Math.max(60_000, Math.min(120_000, ttlMs)) });
     if (result.saved !== true) throw new WorldStorageError();
   }

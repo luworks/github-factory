@@ -6,7 +6,6 @@ import { GitHubClient, GitHubError, parseRepo, type RepoCollection, type RepoRef
 import { WorldStore, worldStorePath } from "./store";
 import { PublicGitHubQuota } from "./public-quota";
 import { join } from "node:path";
-import { requireOpenSourceLicense } from "./open-source";
 import { isRenderableWorld } from "./world-readiness";
 import { D1WorldStore } from "./d1-store";
 import type { CachedWorld, SnapshotStore, WorldStorageStatus } from "./world-storage";
@@ -35,14 +34,12 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     },
   });
   const asError = (error: unknown) => error instanceof GitHubError ? error
-    : (error as { code?: string })?.code === "OPEN_SOURCE_REQUIRED"
-      ? new GitHubError("OPEN_SOURCE_REQUIRED", 403, (error as Error).message)
-      : (error as { code?: string })?.code === "IP_RATE_LIMIT"
+    : (error as { code?: string })?.code === "IP_RATE_LIMIT"
         ? new GitHubError("IP_RATE_LIMIT", 429, (error as Error).message, (error as { retryAfter?: number }).retryAfter)
       : new GitHubError("WORLD_UNAVAILABLE", 503, "Repository analysis is temporarily unavailable.");
   const cachedSnapshot = (entry: CachedWorld | null): WorldSnapshot | null => {
     if (!entry) return null;
-    requireOpenSourceLicense(entry.world.repo.license);
+
     return entry.fresh
       ? entry.world
       : {
@@ -64,7 +61,6 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     const ref = parseRepo(input),
       key = ref.fullName.toLowerCase();
     const cached = await options.store.get(key, now());
-    if (cached) requireOpenSourceLicense(cached.world.repo.license);
     // Navigation is cache-first, including historical snapshots. It must never
     // wait on GitHub, consume collection allowance, or start background work.
     if (cached && !settings?.refresh) return cachedSnapshot(cached)!;
@@ -90,7 +86,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     const promise = (async () => {
       try {
         const collected = await options.collector.collect(ref);
-        requireOpenSourceLicense(collected.repo.license);
+
         const world = analyzeCollection(collected);
         const expiresAt = now() + 90_000;
         world.refreshAfter = expiresAt;
@@ -105,7 +101,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         if ((error as { code?: string })?.code === "WORLD_STORAGE_UNAVAILABLE") throw error;
         const typed = asError(error);
         cooldown.set(key, { until: now() + Math.max(15, Math.min(3600, typed.retryAfter || 15)) * 1000, error: typed });
-        if (typed.code === "PUBLIC_ONLY" || typed.code === "OPEN_SOURCE_REQUIRED") {
+        if (typed.code === "PUBLIC_ONLY") {
           await options.store.delete?.(key);
           throw typed;
         }
@@ -130,7 +126,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     const byKey = new Map(summaries.map((row) => [row.key, row]));
     return CURATED_PROJECTS.map((project) => {
       const cached = byKey.get(project.fullName.toLowerCase());
-      return cached?.ready && (() => { try { requireOpenSourceLicense(cached.repo.license); return true; } catch { return false; } })()
+      return cached?.ready
         ? {
             ...project,
             description: cached.repo.description || project.description,

@@ -465,13 +465,11 @@ describe("evidence-bounded offline AI", () => {
   });
 });
 
-test("unknown licensing blocks both cached and paid AI before opening a ledger", async () => {
-  const c = config();
-  const unknown = world(); unknown.repo.license = null;
+test("public unknown licensing does not block AI eligibility; no-key configuration still spends zero", async () => {
+  const c = config(); const unknown = world(); unknown.repo.license = null;
   let requests = 0;
-  const ai = createAiService({ config: c, fetch: fake(async () => { requests++; throw new Error("must not fetch"); }) });
-  await expect(ai.enrichWorld(unknown)).rejects.toMatchObject({ code: "OPEN_SOURCE_REQUIRED", status: 403 });
-  expect(() => ai.getCachedBlueprint(unknown)).toThrow("open-source");
+  const ai = createAiService({ config: { ...c, apiKey: "" }, fetch: fake(async () => { requests++; throw new Error("must not fetch"); }) });
+  expect(ai.getCachedBlueprint(unknown)).toBeNull();
+  assertRules(await ai.enrichWorld(unknown), "provider_not_configured");
   expect(requests).toBe(0);
-  expect(existsSync(join(c.dataDir, "ai-budget.sqlite"))).toBe(false);
 });

@@ -98,8 +98,8 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             </h1>
             <p className="hero-description">
               {zh
-                ? "把开源 GitHub 仓库变成一个可探索的世界。看懂架构，发现正在发生的变化，找到你的下一次贡献。"
-                : "Turn an open-source GitHub repository into a living, explorable world. See the architecture. Follow the work. Find where you belong."}
+                ? "把公开 GitHub 仓库变成一个可探索的世界。看懂架构，发现正在发生的变化，找到你的下一次贡献。"
+                : "Turn a public GitHub repository into a living, explorable world. See the architecture. Follow the work. Find where you belong."}
             </p>
             <form className={`repo-form ${busy ? "is-busy" : ""}`} onSubmit={submit}>
               <Github size={21} />
@@ -129,8 +129,8 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             </form>
             <p className="repo-disclosure">
               {zh
-                ? "仅接受有可识别开源许可证的公开 GitHub 仓库网址。生成 AI 导览时，会将部分仓库路径、架构摘要和项目动态发送给配置的 AI 服务。"
-                : "Enter a public GitHub repository URL with a recognized open-source license. Generating an AI guide sends a limited survey of paths, architecture and activity to the configured AI provider."}
+                ? "接受任何可公开访问的 GitHub 仓库网址；许可证按来源展示。生成 AI 导览时，会将部分仓库路径、架构摘要和项目动态发送给配置的 AI 服务。"
+                : "Enter any publicly accessible GitHub repository URL; license metadata is shown as reported. Generating an AI guide sends a limited survey of paths, architecture and activity to the configured AI provider."}
             </p>
             {busy && (
               <div role="status" className="mapping-status">
@@ -157,7 +157,7 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             <div className="hero-assurances">
               <span>
                 <Github size={13} />
-                {zh ? "开源仓库 · 只读" : "Open-source repos. Read-only."}
+                {zh ? "公开仓库 · 只读" : "Public repos. Read-only."}
               </span>
               <span>
                 <Layers3 size={13} />

@@ -29,3 +29,13 @@ test("SYNTHETIC socket scan recognizes IPv6 and allows only the exact inherited 
   expect(scan.allowedJournalInode).toBe("10"); expect(scan.activeSockets).toEqual(["tcp6:30:01", "unix:40:03"]); expect(scan.unknownSockets).toEqual(["50"]);
   expect(inspectSockets(123, false, (path) => files[path.split("/").at(-1)!] ?? empty, links).activeSockets).toContain("unix:10:03");
 });
+
+test("SYNTHETIC post-drain receipt expires and new work invalidates restart", async () => {
+  const { requireFreshRetirementReceipt } = await import("../scripts/retirement-guard");
+  let verdict = evaluateRetirement(null, sample(0), identity);
+  for (let time = 2000; time <= 240_000; time += 2000) verdict = evaluateRetirement(verdict.state, sample(time), identity);
+  const receipt = { identity, verifiedAtMs: 1_000_000, expiresAtMs: 1_030_000, verdict };
+  expect(() => requireFreshRetirementReceipt(receipt, identity, sample(242_000), 1_000_100)).not.toThrow();
+  expect(() => requireFreshRetirementReceipt(receipt, identity, sample(242_000), 1_030_000)).toThrow();
+  expect(() => requireFreshRetirementReceipt(receipt, identity, sample(242_000, { publicReserved: 1 }), 1_000_100)).toThrow();
+});
