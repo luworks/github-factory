@@ -1,13 +1,10 @@
 import { D1HistoryStore, type HistoryD1Binding } from "./history-storage";
 import type { StorageIdentity } from "./migration-contract";
-import { historyAnchor, validHistoryCursor, type HistoryAppendBatch } from "../src/server/history-storage";
-import { topologyBytes, topologyFrameKey, topologyPath, validateImmutableCommit } from "../src/history/topology";
-import type { ImmutableTreeFrame, TopologyAnchor } from "../src/history/topology-contracts";
+import { validateImmutableCommit } from "../src/history/topology";
+import type { ImmutableCommit } from "../src/history/topology-contracts";
+import { HISTORY_RPC_URL, HISTORY_SCHEMA3_SQL_SHA256, HistoryRpcInputError, parseHistoryWireJson as strictJson, parseHistoryRpcOperation as operation, historyWireInteger as integer } from "../src/server/history-rpc-contract";
 
-export const HISTORY_RPC_URL = "https://chaorders.com/github-factory/_storage/history";
-/** SHA256 of committed, UNAPPLIED deploy/d1/0003-history.sql, not a claim that
- * the current Worker/bootstrap accepts schema3 or that this endpoint is live. */
-export const HISTORY_SCHEMA3_SQL_SHA256 = "6b0f837993b07fee15e7ebf45244b55fa7d9303dfb1ed6a0a885ae0979892994";
+export { HISTORY_RPC_URL, HISTORY_SCHEMA3_SQL_SHA256 } from "../src/server/history-rpc-contract";
 export interface HistoryRpcEnvironment {
   WORLDS_DB?: HistoryD1Binding;
   FACTORY_STORAGE_SECRET?: string; FACTORY_STORAGE_MODE?: string;
@@ -34,31 +31,12 @@ const schemaSql = "SELECT type,name,tbl_name,sql FROM sqlite_master WHERE tbl_na
 const encode = new TextEncoder(), hash = async (s: string) => Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", encode.encode(s))), n => n.toString(16).padStart(2, "0")).join("");
 class Rejection extends Error { constructor(readonly code: string, readonly status: number) { super(code); } }
 const reject = (code = "HISTORY_RPC_INVALID_REQUEST", status = 400): never => { throw new Rejection(code, status); };
-const record = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
-const exact = (v: Record<string, unknown>, keys: string[]) => Object.keys(v).length === keys.length && keys.every(k => Object.hasOwn(v, k));
-const integer = (v: unknown, max = Number.MAX_SAFE_INTEGER): v is number => typeof v === "number" && Number.isSafeInteger(v) && v >= 0 && v <= max;
-const sha = (v: unknown): v is string => typeof v === "string" && /^[a-f0-9]{40}$/.test(v);
-const id = (v: unknown): v is string => typeof v === "string" && /^[a-zA-Z0-9_-]{1,128}$/.test(v);
 async function authenticated(actual: string, expected: string) {
   if (typeof actual !== "string" || typeof expected !== "string") return false;
   if (actual.length < 32 || actual.length > 256 || expected.length < 32 || expected.length > 256 || encode.encode(actual).length > 256 || encode.encode(expected).length > 256) return false;
   const [a, b] = await Promise.all([hash(actual), hash(expected)]); let difference = 0;
   for (let i = 0; i < a.length; i++) difference |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return difference === 0;
-}
-function strictJson(text: string): unknown {
-  const stack: (Set<string> | null)[] = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] === '"') {
-      const start = i++;
-      while (i < text.length && text[i] !== '"') { if (text[i] === "\\") i++; i++; }
-      let next = i + 1; while (next < text.length && /\s/.test(text[next]!)) next++;
-      const object = stack.at(-1);
-      if (object && text[next] === ":") { const name = JSON.parse(text.slice(start, i + 1)); if (object.has(name)) return reject(); object.add(name); }
-    } else if (text[i] === "{" || text[i] === "[") { stack.push(text[i] === "{" ? new Set() : null); if (stack.length > 16) return reject(); }
-    else if (text[i] === "}" || text[i] === "]") stack.pop();
-  }
-  return JSON.parse(text);
 }
 async function readBody(request: Request, timeoutMs: number) {
   const reader = request.body?.getReader(); if (!reader) return reject();
@@ -74,41 +52,6 @@ async function readBody(request: Request, timeoutMs: number) {
     if (performance.now() >= end) return reject("HISTORY_RPC_BODY_TIMEOUT", 408);
     return value;
   } finally { clearTimeout(timer); try { void reader.cancel().catch(() => {}); } catch { /* no pending cancellation promise */ } }
-}
-function normalizedFrame(input: unknown, anchor: TopologyAnchor): ImmutableTreeFrame {
-  if (!record(input) || !exact(input, ["schemaVersion", "repoKey", "commitSha", "treeSha", "scope", "completeness", "sourceCompleteness", "sourceOmittedEntries", "entries", "inputEntryCount", "omittedInputEntries", "deduplicatedInputEntries", "limits", "provenance", "omittedProvenance"]) || input.schemaVersion !== 1 || input.repoKey !== anchor.repoKey || !sha(input.commitSha) || !sha(input.treeSha) || !record(input.scope) || !exact(input.scope, ["prefix", "recursive"]) || !(input.scope.prefix === "" || topologyPath(input.scope.prefix)) || input.scope.recursive !== true) return reject();
-  if (!["full", "partial"].includes(input.completeness as string) || !["full", "partial"].includes(input.sourceCompleteness as string) || !(input.sourceOmittedEntries === null || integer(input.sourceOmittedEntries)) || !(input.omittedProvenance === null || integer(input.omittedProvenance)) || !integer(input.inputEntryCount) || !integer(input.omittedInputEntries) || !integer(input.deduplicatedInputEntries) || !Array.isArray(input.entries) || input.entries.length > 8000 || !Array.isArray(input.limits) || input.limits.length > 2 || new Set(input.limits).size !== input.limits.length || input.limits.some(v => v !== "entry-cap" && v !== "byte-cap")) return reject();
-  if (input.entries.some(e => !record(e) || !exact(e, ["path", "type", "sha"]) || !topologyPath(e.path) || !["blob", "tree", "symlink", "submodule"].includes(e.type as string) || !sha(e.sha)) || !Array.isArray(input.provenance) || input.provenance.length < 1 || input.provenance.length > 8 || input.provenance.some(p => !record(p) || !exact(p, ["sourceUrl", "fetchedAt"]) || ![`https://github.com/${anchor.repoKey}/tree/${input.commitSha}`, `https://api.github.com/repos/${anchor.repoKey}/git/trees/${input.treeSha}?recursive=1`].includes(p.sourceUrl as string) || typeof p.fetchedAt !== "string" || p.fetchedAt.length > 64 || !Number.isFinite(Date.parse(p.fetchedAt))) || topologyBytes(input) > 512 * 1024) return reject();
-  // Identity-dependent C1 semantics (including normalized duplicates, ancestor
-  // conflicts and source timestamps) are validated by the ORIGINAL store against
-  // its retained commit, never a manufactured commit or independent persistence.
-  return input as unknown as ImmutableTreeFrame;
-}
-type Operation = { op: "historyPage"; anchor: TopologyAnchor; offset: number; limit: number } | { op: "historyFrame"; anchor: TopologyAnchor; frameKey: string } | { op: "historyAppend"; batch: HistoryAppendBatch };
-function operation(input: unknown): Operation {
-  if (!record(input)) return reject();
-  if (input.op === "historyPage" && exact(input, ["op", "anchor", "offset", "limit"]) && integer(input.offset, 500) && integer(input.limit, 50) && input.limit > 0) return { op: input.op, anchor: historyAnchor(input.anchor), offset: input.offset, limit: input.limit };
-  if (input.op === "historyFrame" && exact(input, ["op", "anchor", "frameKey"]) && typeof input.frameKey === "string" && input.frameKey.length <= 2048) {
-    const anchor = historyAnchor(input.anchor); let parsed: unknown, scope: unknown;
-    try { parsed = JSON.parse(input.frameKey); if (!Array.isArray(parsed) || parsed.length !== 4 || parsed[0] !== anchor.repoKey || !sha(parsed[1]) || !sha(parsed[2]) || typeof parsed[3] !== "string" || JSON.stringify(parsed) !== input.frameKey) return reject(); scope = JSON.parse(parsed[3]); } catch { return reject(); }
-    if (!Array.isArray(scope) || scope.length !== 2 || !(scope[0] === "" || topologyPath(scope[0])) || scope[1] !== true || JSON.stringify(scope) !== parsed[3]) return reject();
-    return { op: input.op, anchor, frameKey: input.frameKey };
-  }
-  if (input.op === "historyAppend" && exact(input, ["op", "batch"]) && record(input.batch)) {
-    const b = input.batch;
-    if (!exact(b, ["anchor", "batchId", "actionId", "expectedRevision", "expectedCursor", "unit"]) || !id(b.batchId) || !id(b.actionId) || !integer(b.expectedRevision) || !validHistoryCursor(b.expectedCursor) || b.expectedCursor.revision !== b.expectedRevision || !record(b.unit) || b.unit.complete !== true) return reject();
-    const anchor = historyAnchor(b.anchor), u = b.unit;
-    if (u.kind === "commits" && exact(u, ["kind", "complete", "commits"]) && Array.isArray(u.commits) && u.commits.length > 0 && u.commits.length <= 4) {
-      const commits = u.commits.map(c => { if (!record(c) || !Object.hasOwn(c, "omittedProvenance")) return reject(); const parsed = validateImmutableCommit(c); if (!parsed.ok || parsed.value.repoKey !== anchor.repoKey) return reject(); return parsed.value; });
-      if (new Set(commits.map(c => c.sha)).size !== commits.length) return reject();
-      return { op: input.op, batch: { anchor, batchId: b.batchId, actionId: b.actionId, expectedRevision: b.expectedRevision, expectedCursor: b.expectedCursor, unit: { kind: "commits", complete: true, commits } } };
-    }
-    if (u.kind === "frames" && exact(u, ["kind", "complete", "frames"]) && Array.isArray(u.frames) && u.frames.length > 0 && u.frames.length <= 2) {
-      const frames = u.frames.map(f => normalizedFrame(f, anchor)); if (new Set(frames.map(topologyFrameKey)).size !== frames.length) return reject();
-      return { op: input.op, batch: { anchor, batchId: b.batchId, actionId: b.actionId, expectedRevision: b.expectedRevision, expectedCursor: b.expectedCursor, unit: { kind: "frames", complete: true, frames } } };
-    }
-  }
-  return reject();
 }
 async function schema(db: HistoryD1Binding) {
   const marker = await db.prepare("SELECT version,sql_sha256 FROM schema_migrations ORDER BY version DESC LIMIT 1").first<{ version: number; sql_sha256: string }>();
@@ -134,6 +77,7 @@ function reply(value: unknown, status = 200) { return new Response(JSON.stringif
  * proof of the physical Cloudflare binding or active Worker version. */
 export async function historyStorageRpc(request: Request, env: HistoryRpcEnvironment, options: { bodyTimeoutMs?: number } = {}): Promise<Response> {
   let batchStarted = false;
+  let verified: { op: string; identity: StorageIdentity; schemaVersion: 3 } | undefined;
   try {
     if (!await authenticated(request.headers.get("x-factory-storage-key") ?? "", env.FACTORY_STORAGE_SECRET ?? "")) return reject("HISTORY_STORAGE_AUTH_REQUIRED", 403);
     if (env.FACTORY_STORAGE_MODE !== "worlds") return reject("HISTORY_STORAGE_MODE_REJECTED", 503);
@@ -148,15 +92,26 @@ export async function historyStorageRpc(request: Request, env: HistoryRpcEnviron
     if (!identityRows.success || identityRows.results.length !== 1 || identityRows.results[0]?.singleton !== 1 || identityRows.results[0]?.database_uuid !== env.FACTORY_STORAGE_DATABASE_ID || identityRows.results[0]?.binding_nonce !== env.FACTORY_STORAGE_BINDING_NONCE) return reject("HISTORY_STORAGE_IDENTITY_UNAVAILABLE", 503);
     await schema(db);
     const identity: StorageIdentity = { databaseId: env.FACTORY_STORAGE_DATABASE_ID!, bindingNonce: env.FACTORY_STORAGE_BINDING_NONCE!, epoch: env.FACTORY_MIGRATION_EPOCH!, sourceSha: env.FACTORY_SOURCE_SHA!, workerBundleSha256: env.FACTORY_WORKER_BUNDLE_SHA256!, admissionFenced: env.FACTORY_ADMISSION_FENCE !== "" };
+    verified = { op: op.op, identity, schemaVersion: 3 };
     // Observe initiation only; an exception after this point is not a rollback
     // receipt. This wraps the existing store, never reimplements its persistence.
     const store = new D1HistoryStore({ prepare: sql => db.prepare(sql), batch: statements => { batchStarted = true; return db.batch(statements); } });
-    const result = op.op === "historyPage" ? await store.page(op.anchor, op.offset, op.limit) : op.op === "historyFrame" ? await store.frame(op.anchor, op.frameKey) : await store.append(op.batch);
-    return reply({ ok: true, backend: "d1", op: op.op, identity, schemaVersion: 3, result });
+    let result: unknown, proofCommit: ImmutableCommit | undefined;
+    if (op.op === "historyFrame") {
+      const frame = await store.frame(op.anchor, op.frameKey); result = frame;
+      if (frame.status === "available") {
+        const row = await db.prepare("SELECT payload FROM history_commits WHERE repo=? AND sha=?").bind(op.anchor.repoKey, frame.frame.commitSha).first<{ payload: string }>();
+        if (!row || new TextEncoder().encode(row.payload).length > 2048) return reject("HISTORY_STORAGE_UNAVAILABLE", 503);
+        const parsed = validateImmutableCommit(JSON.parse(row.payload));
+        if (!parsed.ok || JSON.stringify(parsed.value) !== row.payload || parsed.value.repoKey !== op.anchor.repoKey || parsed.value.sha !== frame.frame.commitSha || parsed.value.treeSha !== frame.frame.treeSha) return reject("HISTORY_STORAGE_UNAVAILABLE", 503);
+        proofCommit = parsed.value;
+      }
+    } else result = op.op === "historyPage" ? await store.page(op.anchor, op.offset, op.limit) : await store.append(op.batch);
+    return reply({ ok: true, backend: "d1", ...verified, result, ...(proofCommit ? { proofCommit } : {}) });
   } catch (error) {
-    if (batchStarted) return reply({ ok: false, backend: "d1", code: "HISTORY_WRITE_OUTCOME_UNKNOWN", error: "The write outcome is unknown. Read authoritative history before another explicit action; no retry was sent.", writeOutcome: "unknown" }, 503);
-    const code = error instanceof Rejection ? error.code : known.has((error as { code?: string })?.code ?? "") ? (error as { code: string }).code : "HISTORY_STORAGE_UNAVAILABLE";
-    const status = error instanceof Rejection ? error.status : code.endsWith("-cap") ? 429 : /conflict|already-used|non-spine|membership-unknown|unresolved|cycle/.test(code) ? 409 : known.has(code) ? 400 : 503;
-    return reply({ ok: false, backend: "d1", code, error: status < 500 ? "The fixed history storage request was rejected." : "Authoritative history storage is unavailable.", writeOutcome: "not-started" }, status);
+    if (batchStarted) return reply({ ok: false, backend: "d1", ...verified, code: "HISTORY_WRITE_OUTCOME_UNKNOWN", error: "The write outcome is unknown. Read authoritative history before another explicit action; no retry was sent.", writeOutcome: "unknown" }, 503);
+    const code = error instanceof Rejection || error instanceof HistoryRpcInputError ? error.code : known.has((error as { code?: string })?.code ?? "") ? (error as { code: string }).code : "HISTORY_STORAGE_UNAVAILABLE";
+    const status = error instanceof Rejection || error instanceof HistoryRpcInputError ? error.status : code.endsWith("-cap") ? 429 : /conflict|already-used|non-spine|membership-unknown|unresolved|cycle/.test(code) ? 409 : known.has(code) ? 400 : 503;
+    return reply({ ok: false, backend: "d1", ...verified, code, error: status < 500 ? "The fixed history storage request was rejected." : "Authoritative history storage is unavailable.", writeOutcome: "not-started" }, status);
   }
 }

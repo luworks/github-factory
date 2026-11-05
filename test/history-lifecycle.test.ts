@@ -20,8 +20,8 @@ if (process.env.HISTORY_LIFECYCLE_SYNTHETIC_CHILD !== "1") {
   // A caller cannot bypass isolation by inheriting the synthetic-child flag:
   // reject before importing or invoking any original runtime/config module.
   if (readdirSync(process.cwd()).length || Object.keys(process.env).sort().join() !== "HISTORY_LIFECYCLE_SYNTHETIC_CHILD,MOONSHOT_WORLD_WRITES_HOLD,NODE_ENV,TZ") throw new Error("Original-counter tests require the isolated empty cwd and minimal synthetic environment.");
-  const [{ createHistoryLifecycle }, { activePublicAnalyses, publicAnalysis }, { HistoryGitHubReader, observeHistoryReaderSettlement }, { createHistoryHttp }, { HistoryService }, { HistoryCursorCodec }, { D1HistoryStore }, { Database }, { readFileSync }, { syntheticWorld }] = await Promise.all([
-    import("../src/server/history-lifecycle"), import("../src/server/runtime-activity"), import("../src/server/history-github"), import("../src/server/history-http"), import("../src/server/history-service"), import("../src/server/history-cursor"), import("../deploy/history-storage"), import("bun:sqlite"), import("node:fs"), import("./fixtures/browser-world"),
+  const [{ createHistoryLifecycle }, { activePublicAnalyses, publicAnalysis }, { HistoryGitHubReader, observeHistoryReaderSettlement }, { createHistoryHttp }, { HistoryService }, { HistoryCursorCodec }, { D1HistoryStore }, { Database }, { readFileSync }, { syntheticWorld }, { D1RpcHistoryStore }, { historyStorageRpc }, { HISTORY_RPC_URL, HISTORY_SCHEMA3_SQL_SHA256 }] = await Promise.all([
+    import("../src/server/history-lifecycle"), import("../src/server/runtime-activity"), import("../src/server/history-github"), import("../src/server/history-http"), import("../src/server/history-service"), import("../src/server/history-cursor"), import("../deploy/history-storage"), import("bun:sqlite"), import("node:fs"), import("./fixtures/browser-world"), import("../src/server/d1-history-store"), import("../deploy/history-rpc"), import("../src/server/history-rpc-contract"),
   ]);
   function deferred<T = void>() { let resolve!: (value: T | PromiseLike<T>) => void, reject!: (e: unknown) => void; const promise = new Promise<T>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
   const repo = "synthetic-moonshot/browser-fixture", sha = (n: number) => n.toString(16).padStart(40, "0"), metadata = () => new Response(JSON.stringify({ private: false, visibility: "public", full_name: repo, license: null }));
@@ -147,5 +147,51 @@ if (process.env.HISTORY_LIFECYCLE_SYNTHETIC_CHILD !== "1") {
     const f = await httpFixture();
     try { const first = await (await f.handle(f.request())).json(); f.race(); const r = await f.handle(f.request(JSON.stringify({ action: "walk", cursor: first.token }))); expect(r.status).toBe(503); expect((await r.json()).code).toBe("STORAGE_MIGRATION_HOLD"); expect(activePublicAnalyses()).toBe(0); expect(f.collections).toBe(0); expect(f.calls).toBe(0); expect(f.db.query("SELECT * FROM history_commits").all()).toHaveLength(0); expect((await f.handle(f.request())).status).toBe(200); }
     finally { process.env.MOONSHOT_WORLD_WRITES_HOLD = "0"; f.db.close(); }
+  });
+
+  async function rpcHttpFixture() {
+    const f = await httpFixture(); f.db.exec("PRAGMA foreign_keys=ON"); for (const file of ["0001-world-cache.sql", "0002-migration-identity.sql"]) f.db.exec(readFileSync(new URL(`../deploy/d1/${file}`, import.meta.url), "utf8"));
+    const identity = { databaseId: "11111111-1111-4111-8111-111111111111", bindingNonce: "a".repeat(32), epoch: "b".repeat(32), sourceSha: "c".repeat(40), workerBundleSha256: "d".repeat(64) }, secret = "SYNTHETIC-isolated-child-storage-secret";
+    f.db.query("INSERT INTO storage_identity VALUES(1,?,?,?)").run(identity.databaseId, identity.bindingNonce, "SYNTHETIC"); f.db.query("INSERT INTO schema_migrations VALUES(3,'SYNTHETIC',?)").run(HISTORY_SCHEMA3_SQL_SHA256);
+    const stmt = (sql: string, values: unknown[] = []) => ({ bind(...v: unknown[]) { return stmt(sql, v); }, async all<T>() { return { success: true, results: f.db.query(sql).all(...values as any[]) as T[] }; }, async first<T>() { return f.db.query(sql).get(...values as any[]) as T | null; }, execute() { f.db.query(sql).run(...values as any[]); return { success: true }; } });
+    const binding = { prepare: (sql: string) => stmt(sql), async batch(rows: any[]) { return f.db.transaction(() => rows.map(s => s.execute()))(); } };
+    const env = { WORLDS_DB: binding, FACTORY_STORAGE_SECRET: secret, FACTORY_STORAGE_MODE: "worlds", FACTORY_STORAGE_DATABASE_ID: identity.databaseId, FACTORY_STORAGE_BINDING_NONCE: identity.bindingNonce, FACTORY_MIGRATION_EPOCH: identity.epoch, FACTORY_SOURCE_SHA: identity.sourceSha, FACTORY_WORKER_BUNDLE_SHA256: identity.workerBundleSha256, FACTORY_ADMISSION_FENCE: "" };
+    let intercept: ((op: any, actual: () => Promise<Response>) => Promise<Response>) | undefined, writes = 0;
+    const store = new D1RpcHistoryStore({ endpoint: HISTORY_RPC_URL, secret, identity }, async (input, init) => { const op = JSON.parse(String(init?.body)); if (op.op === "historyAppend") writes++; const actual = () => historyStorageRpc(new Request(input, init), env); return intercept ? intercept(op, actual) : actual(); }, { timeoutMs: 25 });
+    f.deps.makeService = admission => new HistoryService({ ...f.settings, ...admission, store }); f.deps.lifecycle = createHistoryLifecycle(f.quota, store.observeSettlement);
+    return { ...f, rpc: store, get writes() { return writes; }, intercept(fn: typeof intercept) { intercept = fn; } };
+  }
+
+  test("CHILD actual RPC commit with late headers/cancel returns unconfirmed while ORIGINAL count remains held", async () => {
+    for (const reject of [false, true]) {
+      const f = await rpcHttpFixture(), late = deferred<Response>(), cleanup = deferred<void>();
+      try {
+        const initial = await f.handle(f.request()); expect(initial.status).toBe(200); const first = await initial.json(); expect(activePublicAnalyses()).toBe(0);
+        f.intercept(async (op, actual) => { const response = await actual(); return op.op === "historyAppend" ? late.promise : response; });
+        const r = await f.handle(f.request(JSON.stringify({ action: "walk", cursor: first.token }))), result = await r.json();
+        expect(r.status).toBe(503); expect(result.status).toBe("save-unconfirmed"); expect(result.persisted.commits).toBe(0); expect(result.unconfirmed.commits).toBe(1); expect(result.token).toBeNull(); expect(f.db.query("SELECT * FROM history_commits").all()).toHaveLength(1); expect(f.writes).toBe(1); expect(activePublicAnalyses()).toBe(1); expect(f.rpc.observeSettlement().idle).toBe(false);
+        late.resolve(new Response(new ReadableStream({ cancel() { return cleanup.promise; } }))); await tick(); expect(activePublicAnalyses()).toBe(1);
+        if (reject) cleanup.reject(new Error("SYNTHETIC RPC cancellation rejected")); else cleanup.resolve(); await tick(); expect(activePublicAnalyses()).toBe(0); expect(f.rpc.observeSettlement().idle).toBe(true);
+      } finally { cleanup.resolve(); f.db.close(); }
+    }
+  });
+
+  test("CHILD late RPC response body/cancel and unrelated analysis remain independently counted", async () => {
+    const f = await rpcHttpFixture(), cleanup = deferred<void>(), body = deferred<void>(), neighborGate = deferred<void>();
+    const neighbor = publicAnalysis(() => neighborGate.promise);
+    try {
+      const initial = await f.handle(f.request()); expect(initial.status).toBe(200); const first = await initial.json();
+      f.intercept(async () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"ok":')); }, pull() { return body.promise; }, cancel() { return cleanup.promise; } }), { headers: { "content-type": "application/json" } }));
+      const r = await f.handle(f.request(JSON.stringify({ action: "walk", cursor: first.token }))); expect(r.status).toBe(503); expect(activePublicAnalyses()).toBe(2); expect(f.writes).toBe(0);
+      cleanup.resolve(); body.resolve(); await tick(); expect(activePublicAnalyses()).toBe(1); neighborGate.resolve(); await neighbor; expect(activePublicAnalyses()).toBe(0);
+    } finally { cleanup.resolve(); body.resolve(); neighborGate.resolve(); f.db.close(); }
+  });
+
+  test("CHILD invalid storage settlement is UNKNOWN, fails closed and never becomes a fabricated idle/drain receipt", async () => {
+    const hook = createHistoryLifecycle({ take() {} }, (() => undefined) as any);
+    await expect(hook.run(async () => "not a drain proof")).rejects.toMatchObject({ code: "HISTORY_LIFECYCLE_UNAVAILABLE" });
+    // Intentional unresolved authority in THIS isolated child only: there is no
+    // valid settlement to release it. No timer/poll/forced unlock or real runtime.
+    expect(activePublicAnalyses()).toBe(1);
   });
 }

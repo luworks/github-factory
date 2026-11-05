@@ -1,16 +1,20 @@
 import { migrationHeld, publicAnalysis } from "./runtime-activity";
 import { observeHistoryReaderSettlement } from "./history-github";
 import type { HistoryCleanupRetainer, HistoryHttpLifecycle } from "./history-http";
+import type { HistoryPhysicalObservation } from "./d1-history-store";
 
 const invalid = () => Object.assign(new Error("The original history analysis lifetime could not be established."), { code: "HISTORY_LIFECYCLE_UNAVAILABLE", status: 503 });
 
 /** Concrete original-counter hook, NOT WIRED into any route/runtime. The caller
  * must inject the SAME original quota object used by its service and reader.
+ * RPC-backed callers MUST also pass the exact store's observeSettlement hook;
+ * omission is only for stores with no pending remote transport (legacy tests).
  * No new authoritative counter, quota, key, ledger or polling loop is created.
  * Physical settlement here is local promise settlement, never proof of remote
  * processing cancellation, database rollback or a production drain/retirement. */
-export function createHistoryLifecycle(authority: object): HistoryHttpLifecycle {
+export function createHistoryLifecycle(authority: object, observeStorage?: () => HistoryPhysicalObservation): HistoryHttpLifecycle {
   if (!authority || (typeof authority !== "object" && typeof authority !== "function") || typeof (authority as { take?: unknown }).take !== "function") throw invalid();
+  if (observeStorage !== undefined && typeof observeStorage !== "function") throw invalid();
   return {
     held: migrationHeld,
     run<T>(work: (retain: HistoryCleanupRetainer) => Promise<T>): Promise<T> {
@@ -40,13 +44,25 @@ export function createHistoryLifecycle(authority: object): HistoryHttpLifecycle 
         } catch (caught) { failed = true; error = caught; }
         finally { sealed = true; }
         const reader = observeHistoryReaderSettlement(authority);
-        if (retained.size || !reader.idle) {
+        let storage: HistoryPhysicalObservation;
+        try {
+          storage = observeStorage ? observeStorage() : { idle: true, settled: Promise.resolve() };
+          if (storage?.settled && typeof storage.settled.then === "function") void Promise.resolve(storage.settled).catch(() => {});
+          if (!storage || typeof storage.idle !== "boolean" || !storage.settled || typeof storage.settled.then !== "function") throw invalid();
+        } catch {
+          // Unknown is never idle. Fail the response and retain the ORIGINAL
+          // activity authority; no polling, forced retirement or second counter.
+          fail(invalid()); await new Promise<void>(() => {}); return;
+        }
+        const observers = Promise.all([reader.settled, storage.settled]).catch(async () => { fail(invalid()); await new Promise<void>(() => {}); });
+        if (retained.size || !reader.idle || !storage.idle) {
           // Timeout/error response can leave now, while publicAnalysis remains
           // open through already-registered physical work and the reader's own
           // finished+pending0 release (including late-fetch -> cancel transfer).
           if (failed) fail(error); else publish(value!);
-          await Promise.allSettled([...retained, reader.settled]);
+          await Promise.all([Promise.allSettled([...retained]), observers]);
         }
+        else await observers;
       });
       // Fast paths publish AFTER the original finally decrements the counter.
       // Pending paths already published; resolving/rejecting twice is harmless

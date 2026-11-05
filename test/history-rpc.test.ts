@@ -21,12 +21,12 @@ const append = (a: ReturnType<typeof anchor>, commits: ImmutableCommit[], cursor
 const frameBatch = (a: ReturnType<typeof anchor>, frames: ImmutableTreeFrame[], cursor: HistoryCursor, name = "frames"): HistoryAppendBatch => ({ ...append(a, [], cursor, name), unit: { kind: "frames", complete: true, frames } });
 const page = (a: ReturnType<typeof anchor>) => ({ op: "historyPage", anchor: a, offset: 0, limit: 50 });
 const business = (s: string) => /(?:FROM|INTO|UPDATE|JOIN)\s+history_/i.test(s);
-interface Options { path?: string; reopen?: boolean; historySql?: string; postCommitThrow?: boolean; beforeBatch?: () => void | Promise<void>; failRead?: boolean; falseRead?: boolean }
+interface Options { path?: string; reopen?: boolean; historySql?: string; postCommitThrow?: boolean; beforeBatch?: () => void | Promise<void>; failRead?: boolean; falseRead?: boolean; proofOverride?: { payload: string } | null }
 function fixture(options: Options = {}) {
   const db = new Database(options.path ?? ":memory:"); db.exec("PRAGMA foreign_keys=ON");
   if (!options.reopen) { db.exec(sql1); db.exec(sql2); db.exec(options.historySql ?? sql3); db.query("INSERT INTO storage_identity VALUES(1,?,?,?)").run(uuid, nonce, "2026-11-04T00:00:00Z"); db.query("INSERT INTO schema_migrations VALUES(3,?,?)").run("2026-11-04T00:00:00Z", HISTORY_SCHEMA3_SQL_SHA256); }
   const queries: string[] = []; let batches = 0, sessions = 0;
-  const stmt = (sql: string, values: unknown[] = []) => ({ bind(...v: unknown[]) { return stmt(sql, v); }, async all<T>() { queries.push(sql); if (options.failRead) throw new Error(`SQL:${storageSecret}`); return { success: !options.falseRead, results: db.query(sql).all(...values as any[]) as T[] }; }, async first<T>() { queries.push(sql); if (options.failRead) throw new Error(`SQL:${storageSecret}`); return db.query(sql).get(...values as any[]) as T | null; }, execute() { queries.push(sql); db.query(sql).run(...values as any[]); return { success: true }; } });
+  const stmt = (sql: string, values: unknown[] = []) => ({ bind(...v: unknown[]) { return stmt(sql, v); }, async all<T>() { queries.push(sql); if (options.failRead) throw new Error(`SQL:${storageSecret}`); return { success: !options.falseRead, results: db.query(sql).all(...values as any[]) as T[] }; }, async first<T>() { queries.push(sql); if (options.failRead) throw new Error(`SQL:${storageSecret}`); if (sql === "SELECT payload FROM history_commits WHERE repo=? AND sha=?" && options.proofOverride !== undefined) return options.proofOverride as T | null; return db.query(sql).get(...values as any[]) as T | null; }, execute() { queries.push(sql); db.query(sql).run(...values as any[]); return { success: true }; } });
   const binding: HistoryD1Binding = { prepare: sql => stmt(sql), async batch(statements) { batches++; await options.beforeBatch?.(); const result = db.transaction(() => statements.map(s => (s as ReturnType<typeof stmt>).execute()))(); if (options.postCommitThrow) throw new Error(`POST_COMMIT_TRANSPORT:${storageSecret}`); return result; }, withSession() { sessions++; return binding; } };
   const env: HistoryRpcEnvironment = { WORLDS_DB: binding, FACTORY_STORAGE_SECRET: storageSecret, FACTORY_STORAGE_MODE: "worlds", FACTORY_STORAGE_DATABASE_ID: uuid, FACTORY_STORAGE_BINDING_NONCE: nonce, FACTORY_MIGRATION_EPOCH: epoch, FACTORY_SOURCE_SHA: sourceSha, FACTORY_WORKER_BUNDLE_SHA256: moduleSha, FACTORY_ADMISSION_FENCE: "" };
   const request = (body: unknown, extra: { url?: string; method?: string; headers?: Record<string, string>; raw?: BodyInit } = {}) => new Request(extra.url ?? HISTORY_RPC_URL, { method: extra.method ?? "POST", headers: { "content-type": "application/json", "x-factory-storage-key": storageSecret, ...extra.headers }, ...((extra.method ?? "POST") === "GET" ? {} : { body: extra.raw ?? JSON.stringify(body), duplex: "half" } as RequestInit) });
@@ -179,5 +179,17 @@ test("SYNTHETIC post-commit binding exception is explicitly unknown, has no retr
     f.options.postCommitThrow = false; const observed = await (await f.rpc(page(a))).json(); expect(observed.result.commits).toHaveLength(1); expect(observed.result.cursor.revision).toBe(1);
     const explicitRetry = await (await f.rpc({ op: "historyAppend", batch })).json(); expect(explicitRetry.result.idempotent).toBe(true); expect(f.batches).toBe(1);
     f.options.failRead = true; const unavailable = await f.rpc(page(a)), error = await unavailable.text(); expect(unavailable.status).toBe(503); expect(error).not.toContain(storageSecret); expect(error).not.toContain("SQL:"); expect(JSON.parse(error).writeOutcome).toBe("not-started");
+  } finally { f.db.close(); }
+});
+
+test("SYNTHETIC available-frame wire sibling is the real retained commit; missing/corrupt/mismatched proof fails closed", async () => {
+  const f = fixture(), a = anchor(1), c = commit(1), tree = frame(c);
+  try {
+    const saved = await (await f.rpc({ op: "historyAppend", batch: append(a, [c]) })).json(); await f.rpc({ op: "historyAppend", batch: frameBatch(a, [tree], saved.result.currentCursor) });
+    const body = { op: "historyFrame", anchor: a, frameKey: topologyFrameKey(tree) }, success = await (await f.rpc(body)).json(); expect(success.proofCommit).toEqual(c);
+    const before = f.dump();
+    for (const override of [null, { payload: "not json" }, { payload: JSON.stringify(commit(2)) }, { payload: JSON.stringify({ ...c, treeSha: sha(99) }) }]) {
+      f.options.proofOverride = override; const response = await f.rpc(body), result = await response.json(); expect(response.status).toBe(503); expect(result).toMatchObject({ ok: false, backend: "d1", op: "historyFrame", schemaVersion: 3, identity: { databaseId: uuid }, writeOutcome: "not-started" }); expect(f.dump()).toBe(before);
+    }
   } finally { f.db.close(); }
 });

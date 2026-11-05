@@ -20,11 +20,12 @@ export interface HistoryServiceDependencies {
 }
 export interface HistoryCapture { identity: WorldIdentity; anchor: TopologyAnchor; stale: boolean; partial: boolean }
 export interface HistoryActionResult {
-  status: "saved" | "not-saved" | "partially-saved";
+  status: "saved" | "not-saved" | "partially-saved" | "save-unconfirmed";
   capture: HistoryCapture | null;
   token: string | null;
   observed: HistoryReadResult | null;
   persisted: { commits: number; frames: number; batches: number; cursor: HistoryCursor | null };
+  unconfirmed: { kind: "commits" | "frames"; commits: number; frames: number; anchor: TopologyAnchor; expectedRevision: number; batchId: string; writeOutcome: "unknown" } | null;
   error: { code: string; status: number; message: string; retryAfter?: number } | null;
 }
 export class HistoryServiceError extends Error {
@@ -116,7 +117,7 @@ export class HistoryService {
     }
   }
   async act(repo: string, input: unknown): Promise<HistoryActionResult> {
-    const result: HistoryActionResult = { status: "not-saved", capture: null, token: null, observed: null, persisted: { commits: 0, frames: 0, batches: 0, cursor: null }, error: null };
+    const result: HistoryActionResult = { status: "not-saved", capture: null, token: null, observed: null, persisted: { commits: 0, frames: 0, batches: 0, cursor: null }, unconfirmed: null, error: null };
     const authority = this.deps.reader.quota as object; let held = false;
     try {
       // One invocation-specific request admission. The reader only verifies this
@@ -156,7 +157,14 @@ export class HistoryService {
       const actionId = crypto.randomUUID().replaceAll("-", "");
       const save = async (unit: { kind: "commits"; complete: true; commits: ImmutableCommit[] } | { kind: "frames"; complete: true; frames: ImmutableTreeFrame[] }, suffix: string) => {
         await this.current(c);
-        const saved = await this.deps.store.append({ anchor: c.anchor, batchId: `${actionId}_${suffix}`, actionId: `${actionId}_${suffix}`, expectedRevision: cursor.revision, expectedCursor: cursor, unit });
+        const batchId = `${actionId}_${suffix}`;
+        let saved;
+        try { saved = await this.deps.store.append({ anchor: c.anchor, batchId, actionId: batchId, expectedRevision: cursor.revision, expectedCursor: cursor, unit }); }
+        catch (error) {
+          const e = error as { code?: string; writeOutcome?: string };
+          if (e.writeOutcome === "unknown" || e.code === "HISTORY_WRITE_OUTCOME_UNKNOWN") result.unconfirmed = { kind: unit.kind, commits: unit.kind === "commits" ? unit.commits.length : 0, frames: unit.kind === "frames" ? unit.frames.length : 0, anchor: c.anchor, expectedRevision: cursor.revision, batchId, writeOutcome: "unknown" };
+          throw error;
+        }
         cursor = saved.currentCursor; result.persisted.cursor = cursor; result.persisted.batches++; result.status = "partially-saved";
         if (unit.kind === "commits") result.persisted.commits += unit.commits.length;
         else result.persisted.frames += unit.frames.length;
@@ -173,9 +181,9 @@ export class HistoryService {
       result.token = token;
     } catch (error) {
       result.token = null;
-      result.status = result.persisted.batches ? "partially-saved" : "not-saved";
+      result.status = result.unconfirmed ? "save-unconfirmed" : result.persisted.batches ? "partially-saved" : "not-saved";
       const e = error as { code?: string; status?: number; retryAfter?: number; message?: string };
-      result.error = { code: e.code ?? "HISTORY_UNAVAILABLE", status: e.status ?? (e.code?.includes("conflict") ? 409 : e.code?.endsWith("-cap") ? 429 : 503), message: error instanceof HistoryServiceError ? error.message : "History storage or admission is unavailable. No automatic retry was attempted.", ...(e.retryAfter !== undefined ? { retryAfter: e.retryAfter } : {}) };
+      result.error = { code: result.unconfirmed ? "HISTORY_WRITE_OUTCOME_UNKNOWN" : e.code ?? "HISTORY_UNAVAILABLE", status: result.unconfirmed ? 503 : e.status ?? (e.code?.includes("conflict") ? 409 : e.code?.endsWith("-cap") ? 429 : 503), message: result.unconfirmed ? "History save is unconfirmed. Confirmed units remain recorded; read authoritative history before another explicit action." : error instanceof HistoryServiceError ? error.message : "History storage or admission is unavailable. No automatic retry was attempted.", ...(e.retryAfter !== undefined ? { retryAfter: e.retryAfter } : {}) };
     } finally { if (held) busy.delete(authority); }
     return result;
   }

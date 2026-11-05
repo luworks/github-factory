@@ -33,12 +33,13 @@ export interface HistoryHttpDependencies {
 class Rejection extends Error { constructor(readonly code: string, readonly status: number) { super(code); } }
 const reject = (code: string, status: number): never => { throw new Rejection(code, status); };
 const record = (x: unknown): x is Record<string, unknown> => !!x && typeof x === "object" && !Array.isArray(x);
-const codes = new Set(`GATEWAY_REQUIRED GATEWAY_UNCONFIGURED CLIENT_IDENTITY_REQUIRED IP_RATE_LIMIT PUBLIC_RATE_LIMIT STORAGE_MIGRATION_HOLD ORIGIN_REJECTED JSON_REQUIRED INPUT_TOO_LARGE INVALID_JSON HISTORY_INVALID_REQUEST HISTORY_INVALID_REPOSITORY HISTORY_CACHE_MISSING HISTORY_CACHE_UNAVAILABLE HISTORY_CAPTURE_INVALID HISTORY_CURSOR_STALE HISTORY_CAPTURE_CHANGED HISTORY_CONTEXT_INVALID HISTORY_CONTEXT_DRIFT HISTORY_MEMBER_UNKNOWN HISTORY_WALK_STOPPED HISTORY_CAPACITY HISTORY_BUSY HISTORY_AUTHORITY_LOST HISTORY_READER_REJECTED HISTORY_UNIT_INVALID HISTORY_UNAVAILABLE HISTORY_HTTP_UNAVAILABLE HISTORY_BODY_TIMEOUT HISTORY_PRIVACY_UNAVAILABLE HISTORY_LIFECYCLE_UNAVAILABLE PUBLIC_ONLY GITHUB_FORBIDDEN GITHUB_RATE_LIMIT REPO_NOT_FOUND GITHUB_UNAVAILABLE GITHUB_REDIRECT GITHUB_INVALID_RESPONSE HISTORY_REQUEST_TIMEOUT HISTORY_ACTION_TIMEOUT HISTORY_CLOCK_INVALID HISTORY_ATTEMPT_CAP HISTORY_COMMIT_WINDOW_CAP HISTORY_COMMIT_INVALID HISTORY_COMMIT_RECORD_CAP HISTORY_IMMUTABLE_COMMIT_CONFLICT HISTORY_PARENTS_UNOBSERVED HISTORY_FRAME_CAP HISTORY_FRAME_NOT_VERIFIED HISTORY_TREE_IDENTITY_INVALID HISTORY_TREE_INVALID HISTORY_IMMUTABLE_TREE_CONFLICT HISTORY_WORKING_SET_CAP HISTORY_TREE_PARTIAL_INVALID HISTORY_TREE_ENTRY_CAP HISTORY_TREE_FRAME_CAP HISTORY_RESPONSE_BYTE_CAP HISTORY_ACTION_BYTE_CAP HISTORY_COOLDOWN_CLOCK_UNKNOWN history-revision-conflict history-storage-unavailable history-commit-cap history-frame-cap history-anchor-cap history-receipt-cap history-byte-cap action-already-used batch-payload-conflict`.split(" "));
+const codes = new Set(`HISTORY_WRITE_OUTCOME_UNKNOWN HISTORY_STORAGE_UNAVAILABLE HISTORY_RPC_INVALID_REQUEST GATEWAY_REQUIRED GATEWAY_UNCONFIGURED CLIENT_IDENTITY_REQUIRED IP_RATE_LIMIT PUBLIC_RATE_LIMIT STORAGE_MIGRATION_HOLD ORIGIN_REJECTED JSON_REQUIRED INPUT_TOO_LARGE INVALID_JSON HISTORY_INVALID_REQUEST HISTORY_INVALID_REPOSITORY HISTORY_CACHE_MISSING HISTORY_CACHE_UNAVAILABLE HISTORY_CAPTURE_INVALID HISTORY_CURSOR_STALE HISTORY_CAPTURE_CHANGED HISTORY_CONTEXT_INVALID HISTORY_CONTEXT_DRIFT HISTORY_MEMBER_UNKNOWN HISTORY_WALK_STOPPED HISTORY_CAPACITY HISTORY_BUSY HISTORY_AUTHORITY_LOST HISTORY_READER_REJECTED HISTORY_UNIT_INVALID HISTORY_UNAVAILABLE HISTORY_HTTP_UNAVAILABLE HISTORY_BODY_TIMEOUT HISTORY_PRIVACY_UNAVAILABLE HISTORY_LIFECYCLE_UNAVAILABLE PUBLIC_ONLY GITHUB_FORBIDDEN GITHUB_RATE_LIMIT REPO_NOT_FOUND GITHUB_UNAVAILABLE GITHUB_REDIRECT GITHUB_INVALID_RESPONSE HISTORY_REQUEST_TIMEOUT HISTORY_ACTION_TIMEOUT HISTORY_CLOCK_INVALID HISTORY_ATTEMPT_CAP HISTORY_COMMIT_WINDOW_CAP HISTORY_COMMIT_INVALID HISTORY_COMMIT_RECORD_CAP HISTORY_IMMUTABLE_COMMIT_CONFLICT HISTORY_PARENTS_UNOBSERVED HISTORY_FRAME_CAP HISTORY_FRAME_NOT_VERIFIED HISTORY_TREE_IDENTITY_INVALID HISTORY_TREE_INVALID HISTORY_IMMUTABLE_TREE_CONFLICT HISTORY_WORKING_SET_CAP HISTORY_TREE_PARTIAL_INVALID HISTORY_TREE_ENTRY_CAP HISTORY_TREE_FRAME_CAP HISTORY_RESPONSE_BYTE_CAP HISTORY_ACTION_BYTE_CAP HISTORY_COOLDOWN_CLOCK_UNKNOWN history-revision-conflict history-storage-unavailable history-commit-cap history-frame-cap history-anchor-cap history-receipt-cap history-byte-cap action-already-used batch-payload-conflict`.split(" "));
 function safeError(error: unknown) {
   const e = error as { code?: unknown; status?: unknown; retryAfter?: unknown };
   const code = typeof e?.code === "string" && codes.has(e.code) ? e.code : "HISTORY_UNAVAILABLE";
   const status = code === "HISTORY_UNAVAILABLE" ? 503 : typeof e?.status === "number" && Number.isInteger(e.status) && e.status >= 400 && e.status <= 599 ? e.status : 503;
-  const message = code === "PUBLIC_ONLY" ? "Only publicly accessible repositories are available."
+  const message = code === "HISTORY_WRITE_OUTCOME_UNKNOWN" ? "History save is unconfirmed. Confirmed units remain recorded; read current history before another explicit action."
+    : code === "PUBLIC_ONLY" ? "Only publicly accessible repositories are available."
     : code === "STORAGE_MIGRATION_HOLD" ? "History analysis is paused for storage maintenance. Cached evidence remains available."
     : code === "HISTORY_CACHE_MISSING" ? "No cached repository capture is available."
     : code === "HISTORY_CAPTURE_CHANGED" ? "The cached capture changed. Read current history before another action; confirmed old-capture saves remain recorded."
@@ -108,7 +109,7 @@ async function body(request: Request, timeout: number, retain: HistoryCleanupRet
 function actionPayload(result: HistoryActionResult) {
   const error = result.error ? safeError(result.error) : null;
   const observed = result.observed ? { ...result.observed, coverage: { ...result.observed.coverage, errors: result.observed.coverage.errors.map(e => ({ ...safeError(e), stage: ["request", "admission", "cursor", "metadata", "commit", "tree", "finalize"].includes(e.stage) ? e.stage : "unknown" })) } } : null;
-  return { status: result.status, capture: result.capture, token: error ? null : result.token, observed, persisted: result.persisted, error };
+  return { status: result.status, capture: result.capture, token: error ? null : result.token, observed, persisted: result.persisted, unconfirmed: result.unconfirmed, error };
 }
 
 /** Injected factory only. There is no route, runtime instance, environment/key
@@ -157,7 +158,15 @@ export function createHistoryHttp(deps: HistoryHttpDependencies) {
           succeeded = true; return completed;
         }
         finally { settled = true; }
-      }); } finally { open = false; }
+      }); } catch (error) {
+        // A settlement-hook failure after service completion cannot erase its
+        // confirmed/uncertain saves. Known-private responses remain fixed only.
+        if (completed && completed.error?.code !== "PUBLIC_ONLY" && (completed.persisted.batches > 0 || completed.unconfirmed)) {
+          const e = safeError(error), payload = actionPayload({ ...completed, status: completed.unconfirmed ? "save-unconfirmed" : "partially-saved", token: null, error: e });
+          return response(payload, e.status, e.retryAfter);
+        }
+        throw error;
+      } finally { open = false; }
       if (!started || !settled || !succeeded || result !== completed) return reject("HISTORY_LIFECYCLE_UNAVAILABLE", 503);
       if (privateResponse) return privateResponse;
       const payload = actionPayload(result); return response(payload, payload.error?.status ?? 200, payload.error?.retryAfter);

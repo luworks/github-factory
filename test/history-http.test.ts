@@ -236,3 +236,13 @@ test("SYNTHETIC privacy revocation settles inside the injected action lifecycle 
     wait.release(); expect((await pending).status).toBe(403); expect(f.finishes).toBe(1); expect(f.world).toBeNull(); expect(f.aliases.size).toBe(0);
   } finally { wait.release(); f.close(); }
 });
+
+test("SYNTHETIC a failing settlement hook after confirmed persistence preserves counts and suppresses the token", async () => {
+  const f = await fixture({ head: 4 });
+  try {
+    const initial = await (await f.handle(request())).json();
+    f.deps.lifecycle = { held: () => false, run: async work => { await work(p => { void p.catch(() => {}); }); throw Object.assign(new Error(`SYNTHETIC_HOOK:${gatewayKey}`), { code: "HISTORY_LIFECYCLE_UNAVAILABLE", status: 503 }); } };
+    const r = await f.handle(request("POST", JSON.stringify({ action: "walk", cursor: initial.token }))), body = await r.json();
+    expect(r.status).toBe(503); expect(body).toMatchObject({ status: "partially-saved", token: null, persisted: { commits: 4, batches: 1 }, error: { code: "HISTORY_LIFECYCLE_UNAVAILABLE" } }); expect(JSON.stringify(body)).not.toContain(gatewayKey); expect(f.db.query("SELECT * FROM history_commits").all()).toHaveLength(4);
+  } finally { f.close(); }
+});
