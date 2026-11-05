@@ -47,3 +47,11 @@ test("rate limit responses retain retry guidance", async () => {
   expect(response.status).toBe(429);
   expect(response.headers.get("retry-after")).toBe("8");
 });
+
+test("storage outage and migration HOLD remain distinguishable without exposing raw transport errors", async () => {
+  for (const code of ["WORLD_STORAGE_UNAVAILABLE", "STORAGE_MIGRATION_HOLD"]) {
+    const response = apiError({ status: 503, code, message: "sensitive SQL and credentials" });
+    expect(response.status).toBe(503);
+    const body = await response.json(); expect(body.code).toBe(code); expect(body.error).not.toContain("sensitive");
+  }
+});

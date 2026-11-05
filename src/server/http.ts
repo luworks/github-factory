@@ -20,10 +20,17 @@ export function apiError(error: unknown) {
   const e = error as { status?: number; code?: string; message?: string; retryAfter?: number };
   const status = Number(e?.status);
   const safe = Number.isInteger(status) && status >= 400 && status < 500;
+  // Fixed public messages distinguish authoritative-storage failure/HOLD from
+  // a real miss without disclosing transport, SQL, credentials or raw errors.
+  const storageMessage = status === 503 && e.code === "WORLD_STORAGE_UNAVAILABLE"
+    ? "The authoritative world store is unavailable. Current source state remains unknown; retry later."
+    : status === 503 && e.code === "STORAGE_MIGRATION_HOLD"
+      ? "World storage migration is in progress. Cached source evidence remains available; new analysis is temporarily held."
+      : undefined;
   const response = json(
     {
-      error: safe ? e.message : "The repository service is temporarily unavailable. Please try again.",
-      code: safe ? (e.code ?? "REQUEST_REJECTED") : "SERVICE_UNAVAILABLE",
+      error: storageMessage || (safe ? e.message : "The repository service is temporarily unavailable. Please try again."),
+      code: storageMessage ? e.code : safe ? (e.code ?? "REQUEST_REJECTED") : "SERVICE_UNAVAILABLE",
     },
     safe ? status : 503,
   );
