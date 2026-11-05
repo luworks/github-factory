@@ -119,3 +119,34 @@ test("SYNTHETIC abort-ignoring late response transfers authority ownership direc
 test("SYNTHETIC fully consumed ordinary bodies permit sequential requests and subsequent actions without a stale busy lock",async()=>{
  const f=fixture();expect((await f.reader.read(request())).outcome).toBe("ok");expect((await new HistoryGitHubReader(f.deps).read(request())).outcome).toBe("ok");expect(f.calls).toHaveLength(14);expect(f.maxActive).toBe(1);
 });
+
+test("SYNTHETIC all started asynchronous admission/cursor/quota dependencies hold authority after timeout until resolve or reject",async()=>{
+ for(const kind of ["admitRequest","admitCollection","resolveCursor","quota"]as const)for(const rejectPending of [false,true]){
+  let settle!:(error?:Error)=>void,invocations=0;const pending=new Promise<void>((resolve,reject)=>settle=error=>error?reject(error):resolve()),f=fixture({limits:{actionMs:15,requestMs:10}}),input=kind==="resolveCursor"?{...request(),cursor:handle()}:request();
+  const start=()=>{invocations++;return invocations===1?pending:undefined;};if(kind==="quota")f.deps.quota.take=start;else if(kind==="resolveCursor")f.deps.resolveCursor=async()=>{await start();return proofRoot();};else f.deps[kind]=start;
+  const first=await new HistoryGitHubReader(f.deps).read(input),snapshot=JSON.stringify(first);expect(first.coverage.stopReason).toBe("HISTORY_ACTION_TIMEOUT");expect((await new HistoryGitHubReader(f.deps).read(input)).coverage.stopReason).toBe("HISTORY_BUSY");expect(invocations).toBe(1);expect(f.calls).toHaveLength(0);
+  settle(rejectPending?new Error("SYNTHETIC dependency rejected"):undefined);await Bun.sleep(0);expect((await new HistoryGitHubReader(f.deps).read(input)).outcome).toBe("ok");expect(JSON.stringify(first)).toBe(snapshot);
+ }
+});
+
+test("SYNTHETIC delivered chunks count before deadline rejection, while reads delivered only after return cannot mutate accounting",async()=>{
+ for(const delivery of [11999,12000,12001]){
+  let f:ReturnType<typeof fixture>;f=fixture({intercept:()=>new Response(new ReadableStream<Uint8Array>({pull(controller){controller.enqueue(new Uint8Array(65));f.setClock(delivery);controller.close();}},{highWaterMark:0}))});const r=await f.reader.read(request());expect(r.coverage.bytesObserved).toBe(65);expect(r.coverage.bytesRetained).toBe(delivery<12000?65:0);expect(r.coverage.stopReason).toBe(delivery<12000?"GITHUB_INVALID_RESPONSE":"HISTORY_REQUEST_TIMEOUT");expect(f.calls).toHaveLength(1);
+ }
+ let deliver!:(chunk:ReadableStreamReadResult<Uint8Array>)=>void;const pending=new Promise<ReadableStreamReadResult<Uint8Array>>(resolve=>deliver=resolve),late=fixture({limits:{requestMs:5,actionMs:50},intercept:()=>{const response=json(metadata());Object.defineProperty(response.body!,"getReader",{value:()=>({read:()=>pending,cancel:()=>Promise.resolve()})});return response;}}),r=await late.reader.read(request()),snapshot=JSON.stringify(r);expect(r.coverage.stopReason).toBe("HISTORY_REQUEST_TIMEOUT");expect(r.coverage.bytesObserved).toBe(0);deliver({done:false,value:new Uint8Array(65)});await Bun.sleep(0);expect(JSON.stringify(r)).toBe(snapshot);
+});
+
+test("SYNTHETIC each final tree normalization/publication/finalization boundary observes the same action deadline",async()=>{
+ for(let boundary=1;boundary<=11;boundary++){
+  let stamps=0,afterTree=false,checks=0;const f=fixture();f.deps.wallNow=()=>{if(++stamps===3)afterTree=true;return wall;};f.deps.monotonicNow=()=>afterTree&&++checks>=boundary?45000:0;
+  const r=await new HistoryGitHubReader(f.deps).read({...request(),anchorSha:sha(1),frameShas:[sha(1)]});expect(r.coverage.stopReason).toBe("HISTORY_ACTION_TIMEOUT");expect(r.outcome).toBe("partial");expect(r.commits.map(c=>c.sha)).toEqual([sha(1)]);expect(r.frames).toHaveLength(boundary<=7?0:1);expect(r.nextCursor).toBeNull();expect(f.calls).toHaveLength(3);
+ }
+ const valid=fixture();expect((await valid.reader.read({...request(),anchorSha:sha(1),frameShas:[sha(1)]})).outcome).toBe("ok");
+});
+
+test("SYNTHETIC fatal UTF8 rejects malformed bytes without certifying replacement facts and preserves legitimate split Unicode",async()=>{
+ for(const invalid of [[255],[195],[192,175],[128]]){
+  const f=fixture({intercept:url=>{if(!url.pathname.includes("/git/trees/"))return;const bytes=new TextEncoder().encode(JSON.stringify({...tree(104),tree:[{...tree(104).tree[0],path:"X"}]})),at=Buffer.from(bytes).indexOf('"path":"X"')+8;return new Response(new Uint8Array([...bytes.slice(0,at),...invalid,...bytes.slice(at+1)]));}}),r=await f.reader.read({...request(),frameShas:[sha(4)]});expect(r.coverage.stopReason).toBe("GITHUB_INVALID_RESPONSE");expect(r.frames).toEqual([]);expect(r.commits).toHaveLength(4);expect(f.calls).toHaveLength(6);
+ }
+ const path="合法/�😀.ts",f=fixture({intercept:url=>{if(!url.pathname.includes("/git/trees/"))return;const bytes=new TextEncoder().encode(JSON.stringify({...tree(104),tree:[{path,type:"blob",mode:"100644",sha:sha(501)}]}));let at=0;return new Response(new ReadableStream<Uint8Array>({pull(controller){if(at===bytes.length){controller.close();return;}controller.enqueue(bytes.slice(at,++at));}},{highWaterMark:0}));}}),r=await f.reader.read({...request(),frameShas:[sha(4)]});expect(r.outcome).toBe("ok");expect(r.frames[0].entries[0].path).toBe(path);expect(r.frames[0].completeness).toBe("full");
+});
