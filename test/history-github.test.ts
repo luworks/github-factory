@@ -88,3 +88,34 @@ test("SYNTHETIC no side-branch tree or immutable conflict is silently adopted; p
  const f=fixture(),side=await f.reader.read({...request(),frameShas:[sha(99)]});expect(side.coverage.stopReason).toBe("HISTORY_FRAME_NOT_VERIFIED");expect(f.calls.some(c=>c.url.includes(`/git/trees/${sha(199)}`))).toBe(false);expect(side.commits).toHaveLength(4);
  let trees=0;const g=fixture({intercept:url=>url.pathname.includes("/git/commits/")?json({...commit(parseInt(url.pathname.split("/").at(-1)!,16)),tree:{sha:sha(104)}}):url.pathname.includes("/git/trees/")?json({...tree(104),tree:[{path:trees++?"dir/child":"dir",type:"blob",mode:"100644",sha:sha(700)}]}):undefined}),conflict=await g.reader.read(request());expect(conflict.coverage.stopReason).toBe("HISTORY_IMMUTABLE_TREE_CONFLICT");expect(conflict.frames).toHaveLength(1);expect(conflict.frames[0].entries[0].path).toBe("dir");
 });
+
+test("SYNTHETIC pending body cancellation retains original authority after timeout, resolves/rejects safely and leaves other authorities usable",async()=>{
+ for(const rejectCleanup of [false,true]){
+  let settle!:(error?:Error)=>void,cancelled=0,once=true;const cleanup=new Promise<void>((resolve,reject)=>settle=error=>error?reject(error):resolve()),unhandled:unknown[]=[];
+  const onUnhandled=(reason:unknown)=>{unhandled.push(reason);};process.on("unhandledRejection",onUnhandled);
+  try{
+   const f=fixture({limits:{requestMs:10,actionMs:100},intercept:()=>once?(once=false,new Response(new ReadableStream({pull(){return new Promise(()=>{});},cancel(){cancelled++;return cleanup;}}))):undefined}),first=await f.reader.read(request()),snapshot=JSON.stringify(first);
+   expect(first.coverage.stopReason).toBe("HISTORY_REQUEST_TIMEOUT");expect(cancelled).toBe(1);expect((await new HistoryGitHubReader(f.deps).read(request())).coverage.stopReason).toBe("HISTORY_BUSY");expect(f.calls).toHaveLength(1);
+   expect((await fixture().reader.read(request())).outcome).toBe("ok");settle(rejectCleanup?new Error("SYNTHETIC cancellation rejected"):undefined);await Bun.sleep(0);
+   expect((await new HistoryGitHubReader(f.deps).read(request())).outcome).toBe("ok");expect(f.calls).toHaveLength(8);expect(cancelled).toBe(1);expect(JSON.stringify(first)).toBe(snapshot);await Bun.sleep(0);expect(unhandled).toEqual([]);
+  }finally{settle();process.off("unhandledRejection",onUnhandled);}
+ }
+});
+
+test("SYNTHETIC redirect/error/rate-limit/declared-byte early responses retain their one cancellation lifecycle",async()=>{
+ for(const variant of [{status:302,headers:{location:"https://evil.test/redirect"},code:"GITHUB_REDIRECT"},{status:403,headers:{},code:"GITHUB_FORBIDDEN"},{status:429,headers:{"retry-after":"1"},code:"GITHUB_RATE_LIMIT"},{status:200,headers:{"content-length":String(HISTORY_READ_LIMITS.responseBytes+1)},code:"HISTORY_RESPONSE_BYTE_CAP"}]){
+  let settle!:()=>void,cancelled=0,once=true;const cleanup=new Promise<void>(resolve=>settle=resolve),f=fixture({intercept:()=>once?(once=false,new Response(new ReadableStream({cancel(){cancelled++;return cleanup;}}),{status:variant.status,headers:variant.headers as Record<string,string>})):undefined}),first=await f.reader.read(request()),snapshot=JSON.stringify(first);
+  expect(first.coverage.stopReason).toBe(variant.code);expect(cancelled).toBe(1);expect((await new HistoryGitHubReader(f.deps).read(request())).coverage.stopReason).toBe("HISTORY_BUSY");expect(f.calls).toHaveLength(1);settle();await Bun.sleep(0);f.advance(2000);
+  expect((await f.reader.read(request())).outcome).toBe("ok");expect(f.calls).toHaveLength(8);expect(cancelled).toBe(1);expect(JSON.stringify(first)).toBe(snapshot);
+ }
+});
+
+test("SYNTHETIC abort-ignoring late response transfers authority ownership directly into pending cancellation",async()=>{
+ let receive!:(response:Response)=>void,settle!:()=>void,cancelled=0,once=true;const transport=new Promise<Response>(resolve=>receive=resolve),cleanup=new Promise<void>(resolve=>settle=resolve),f=fixture({limits:{requestMs:10,actionMs:100},intercept:()=>once?(once=false,transport):undefined}),first=await f.reader.read(request()),snapshot=JSON.stringify(first);
+ expect(first.coverage.stopReason).toBe("HISTORY_REQUEST_TIMEOUT");expect((await f.reader.read(request())).coverage.stopReason).toBe("HISTORY_BUSY");receive(new Response(new ReadableStream({cancel(){cancelled++;return cleanup;}})));await Bun.sleep(0);
+ expect(cancelled).toBe(1);expect((await new HistoryGitHubReader(f.deps).read(request())).coverage.stopReason).toBe("HISTORY_BUSY");expect(f.calls).toHaveLength(1);settle();await Bun.sleep(0);expect((await f.reader.read(request())).outcome).toBe("ok");expect(cancelled).toBe(1);expect(JSON.stringify(first)).toBe(snapshot);
+});
+
+test("SYNTHETIC fully consumed ordinary bodies permit sequential requests and subsequent actions without a stale busy lock",async()=>{
+ const f=fixture();expect((await f.reader.read(request())).outcome).toBe("ok");expect((await new HistoryGitHubReader(f.deps).read(request())).outcome).toBe("ok");expect(f.calls).toHaveLength(14);expect(f.maxActive).toBe(1);
+});

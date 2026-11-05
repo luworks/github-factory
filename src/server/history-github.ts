@@ -65,20 +65,23 @@ export class HistoryGitHubReader {
    if(!new RegExp(`^/repos/${plan.anchor.repoKey.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")}(?:$|/git/commits/[a-f0-9]{40}$|/git/trees/[a-f0-9]{40}\\?recursive=1$)`).test(path))throw new Stop("HISTORY_INVALID_API_PATH",400);
    await wait(Promise.resolve().then(()=>this.deps.quota.take()),action.signal);result.coverage.attempts++;check();
    const controller=new AbortController(),duration=Math.min(this.limits.requestMs,end-this.clock()),requestEnd=this.clock()+duration,signal=AbortSignal.any([action.signal,controller.signal]);const timer=setTimeout(()=>controller.abort(new Stop("HISTORY_REQUEST_TIMEOUT",504)),duration);
-   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,response:Response|undefined;
+   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,response:Response|undefined,cancelling=false;
+   // Cancellation can outlive a timed-out read. Retain the same authority until
+   // the actual underlying cleanup settles; starting it twice is not cleanup.
+   const cancelBody=(received=response)=>{if(cancelling||!received?.body)return;cancelling=true;try{track(Promise.resolve(reader?reader.cancel():received.body.cancel()));}catch(error){track(Promise.reject(error));}};
    try{
     result.coverage.networkRequests++;const url=`https://api.github.com${path}`;
-    const transport=track(Promise.resolve().then(()=>this.deps.fetcher(url,{method:"GET",redirect:"error",signal,headers:{Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28","User-Agent":"Moon-Factory-History"}})));transport.then(response=>{if(signal.aborted)void response.body?.cancel().catch(()=>{});},()=>{});response=await wait(transport,signal);
+    const transport=track(Promise.resolve().then(()=>this.deps.fetcher(url,{method:"GET",redirect:"error",signal,headers:{Accept:"application/vnd.github+json","X-GitHub-Api-Version":"2022-11-28","User-Agent":"Moon-Factory-History"}})).then(received=>{if(signal.aborted)cancelBody(received);return received;}));response=await wait(transport,signal);
     check();if(this.clock()>=requestEnd)throw new Stop("HISTORY_REQUEST_TIMEOUT",504);
-    if(response.redirected||response.status>=300&&response.status<400||response.url&&response.url!==url){void response.body?.cancel().catch(()=>{});throw new Stop("GITHUB_REDIRECT",502);}
-    if(response.status===429||response.status===403&&(response.headers.get("x-ratelimit-remaining")==="0"||response.headers.has("retry-after"))){const seconds=retry(response);cooling.set(authority,{until:this.clock()+seconds*1000,clock:this.clock});void response.body?.cancel().catch(()=>{});throw new Stop("GITHUB_RATE_LIMIT",429,seconds);}
-    if(!response.ok){void response.body?.cancel().catch(()=>{});throw new Stop(response.status===403?"GITHUB_FORBIDDEN":response.status===404?"REPO_NOT_FOUND":"GITHUB_UNAVAILABLE",response.status===403?403:response.status===404?404:502);}
+    if(response.redirected||response.status>=300&&response.status<400||response.url&&response.url!==url){throw new Stop("GITHUB_REDIRECT",502);}
+    if(response.status===429||response.status===403&&(response.headers.get("x-ratelimit-remaining")==="0"||response.headers.has("retry-after"))){const seconds=retry(response);cooling.set(authority,{until:this.clock()+seconds*1000,clock:this.clock});throw new Stop("GITHUB_RATE_LIMIT",429,seconds);}
+    if(!response.ok){throw new Stop(response.status===403?"GITHUB_FORBIDDEN":response.status===404?"REPO_NOT_FOUND":"GITHUB_UNAVAILABLE",response.status===403?403:response.status===404?404:502);}
     if(response.headers.get("x-ratelimit-remaining")==="0")cooling.set(authority,{until:this.clock()+retry(response)*1000,clock:this.clock});
-    const cap=Math.min(this.limits.responseBytes,this.limits.actionBytes-result.coverage.bytesObserved),declared=response.headers.get("content-length");if(declared&&/^\d+$/.test(declared)&&Number(declared)>cap){void response.body?.cancel().catch(()=>{});throw new Stop("HISTORY_RESPONSE_BYTE_CAP",502);}
+    const cap=Math.min(this.limits.responseBytes,this.limits.actionBytes-result.coverage.bytesObserved),declared=response.headers.get("content-length");if(declared&&/^\d+$/.test(declared)&&Number(declared)>cap){throw new Stop("HISTORY_RESPONSE_BYTE_CAP",502);}
     reader=response.body?.getReader();if(!reader)throw new Stop("GITHUB_INVALID_RESPONSE",502);const chunks:Uint8Array[]=[];let count=0;
     for(;;){const chunk=await wait(track(reader.read()),signal);check();if(this.clock()>=requestEnd)throw new Stop("HISTORY_REQUEST_TIMEOUT",504);if(chunk.done)break;result.coverage.bytesObserved+=chunk.value.byteLength;count+=chunk.value.byteLength;if(count>this.limits.responseBytes)throw new Stop("HISTORY_RESPONSE_BYTE_CAP",502);if(result.coverage.bytesObserved>this.limits.actionBytes)throw new Stop("HISTORY_ACTION_BYTE_CAP",502);chunks.push(chunk.value);result.coverage.bytesRetained+=chunk.value.byteLength;}
     const bytes=new Uint8Array(count);let offset=0;for(const chunk of chunks){bytes.set(chunk,offset);offset+=chunk.byteLength;}let body:any;try{body=JSON.parse(new TextDecoder().decode(bytes));}catch{throw new Stop("GITHUB_INVALID_RESPONSE",502);}check();if(this.clock()>=requestEnd)throw new Stop("HISTORY_REQUEST_TIMEOUT",504);return{body,fetchedAt:this.wall(),url};
-   }catch(e){if(e instanceof Stop||e instanceof GitHubError)throw e;if(signal.aborted)throw signal.reason;throw new Stop("GITHUB_UNAVAILABLE",502);}finally{clearTimeout(timer);controller.abort();if(reader)void reader.cancel().catch(()=>{});else void response?.body?.cancel().catch(()=>{});}
+   }catch(e){if(e instanceof Stop||e instanceof GitHubError)throw e;if(signal.aborted)throw signal.reason;throw new Stop("GITHUB_UNAVAILABLE",502);}finally{clearTimeout(timer);controller.abort();cancelBody();}
   };
   const update=()=>{const spine=firstParentSpine(plan.anchor,result.commits);if(!spine.ok)throw new Stop("HISTORY_IMMUTABLE_COMMIT_CONFLICT",502);result.commits=[...spine.value.commits];result.coverage.reachedRoot=spine.value.reachedRoot;result.coverage.nextParentSha=spine.value.commits.length?spine.value.nextParentSha:null;return spine.value;};
   try{
