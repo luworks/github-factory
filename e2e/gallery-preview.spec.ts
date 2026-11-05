@@ -1,6 +1,7 @@
 import { basePath, test, expect } from "./fixtures";
 import { projectRepositoryPreview } from "../src/server/gallery-preview";
 import { syntheticGallery } from "../test/fixtures/browser-world";
+import type { StyleId } from "../src/contracts";
 
 const previewApi = "/api/gallery-preview/synthetic-moonshot/browser-fixture";
 test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 600 }); });
@@ -73,4 +74,61 @@ test("SYNTHETIC cache API failure shows unavailable without polling or collectio
   await expect(page.locator(".project-card").filter({ has: page.getByRole("heading", { name: "SYNTHETIC Atlas", exact: true }) })).toContainText("Preview unavailable");
   expect(api.requests.filter((r) => r.path === previewApi)).toHaveLength(1);
   expect(api.requests.filter((r) => r.method === "POST")).toEqual([]);
+});
+
+test("SYNTHETIC all five visible cached styles animate without interaction and freeze under reduced motion", async ({ page, api }) => {
+  await page.setViewportSize({ width: 1440, height: 1400 });
+  await page.clock.install();
+  const styles: StyleId[] = ["moonshot", "factorio", "red-alert", "red-alert-2", "civilization"];
+  const projects = styles.map((style) => ({ ...syntheticGallery[0], fullName: `synthetic-moonshot/preview-${style}`, name: `SYNTHETIC ${style}`, suggestedStyle: style }));
+  api.respond("GET", "/api/gallery", () => ({ body: { projects } }));
+  for (const project of projects) {
+    const world = structuredClone(api.world);
+    world.source = "github"; // Invented fixture facts only; no real upstream.
+    world.repo = { ...world.repo, fullName: project.fullName, name: project.fullName.split("/")[1], url: `https://github.com/${project.fullName}` };
+    api.respond("GET", `/api/gallery-preview/${project.fullName}`, () => ({ body: projectRepositoryPreview(project.fullName, world) }));
+  }
+  await page.goto(`${basePath}/`);
+  await page.locator(".worlds-section").scrollIntoViewIfNeeded();
+  const canvases = page.getByTestId("repository-preview-canvas");
+  await expect(canvases).toHaveCount(5);
+  await expect(page.getByText("Motion illustrates links · not live activity", { exact: true })).toHaveCount(5);
+  const signatures = () => canvases.evaluateAll((elements) => elements.map((element) => {
+    const canvas = element as HTMLCanvasElement;
+    const pixels = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;
+    let hash = 2166136261;
+    for (const value of pixels) hash = Math.imul(hash ^ value, 16777619);
+    return hash >>> 0;
+  }));
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.clock.runFor(350);
+  const firstFrames = await signatures();
+  const requests = api.requests.length;
+  await page.clock.runFor(600);
+  const nextFrames = await signatures();
+  for (let index = 0; index < styles.length; index++) expect(nextFrames[index], `${styles[index]} must visibly repaint without hover`).not.toBe(firstFrames[index]);
+  expect(api.requests).toHaveLength(requests);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.clock.runFor(150);
+  const frozen = await signatures();
+  await page.clock.runFor(600);
+  expect(await signatures()).toEqual(frozen);
+  expect(api.requests.filter((r) => r.method === "POST" || r.path.startsWith("/api/world/"))).toEqual([]);
+});
+
+test("SYNTHETIC top-right GitHub repository link remains visible and usable in English and Chinese mobile layouts", async ({ page }) => {
+  for (const width of [390, 768]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto(`${basePath}/`);
+    for (const language of ["English", "Chinese"]) {
+      const repository = page.locator(".site-header .header-repo-link");
+      await expect(repository).toBeVisible();
+      await expect(repository).toHaveText("GitHub");
+      await expect(repository).toHaveAttribute("href", "https://github.com/luworks/github-factory");
+      await expect(repository).toHaveAttribute("target", "_blank");
+      await expect(repository).toHaveAttribute("rel", "noopener noreferrer");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), `${language} at ${width}px`).toBe(true);
+      await page.getByRole("button", { name: "Switch language" }).click();
+    }
+  }
 });

@@ -69,6 +69,10 @@ export function LandingPage({ lang, onLangChange }: { lang: Lang; onLangChange: 
             {zh ? "创建世界" : "Build a world"}
             <ArrowUpRight size={14} />
           </a>
+          <a className="header-repo-link" href="https://github.com/luworks/github-factory" target="_blank" rel="noopener noreferrer" aria-label={zh ? "GitHub 源码仓库" : "GitHub source repository"}>
+            <Github size={14} />
+            <span>GitHub</span>
+          </a>
         </nav>
       </header>
       <main>

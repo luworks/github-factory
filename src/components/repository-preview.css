@@ -14,3 +14,14 @@
 .project-card-shell > .project-card { display: block; height: 100%; }
 .project-source-link { position: absolute; top: 9px; right: 10px; display: inline-flex; align-items: center; gap: 4px; padding: 4px 6px; border-radius: 2px; background: #10212bd9; color: #f4f2df; font: 9px var(--mono); }
 .project-source-link:hover { background: #10212b; text-decoration: underline; }
+.repository-preview-motion-note { color: #d8e9cd; font-size: 7.5px; letter-spacing: .1px; }
+.site-header nav > a.header-repo-link { display: inline-flex; align-items: center; gap: 6px; color: #33462f; font-weight: 600; }
+.site-header nav > a.header-repo-link:hover { text-decoration: underline; }
+@media (max-width: 900px) {
+  .site-header nav { gap: 17px; }
+  .site-header nav > a[href="#perspectives"] { display: none; }
+}
+@media (max-width: 600px) {
+  .site-header nav > a.header-repo-link.header-repo-link { display: inline-flex; font-size: 10px; gap: 4px; }
+  .site-header nav > a.header-cta { display: none; }
+}
