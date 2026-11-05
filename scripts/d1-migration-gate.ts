@@ -4,7 +4,7 @@ export interface MigrationGateInput {
   source: WorldExport; workerSettings: unknown; expectedIdentity: StorageIdentity;
   admin: MigrationData & { databaseId: string; bindingNonce: string; apiDatabaseId: string };
   rpc: MigrationData & { identity: StorageIdentity };
-  candidateSha: string; actualWorkerBundleSha256: string;
+  candidateSha: string; actualWorkerBundleSha256: string; workerDeploymentId: string; workerVersionId: string;
   activeEnvSha256: string; targetConfigSha256: string; epoch: string;
 }
 /** Pure gate, invoked afresh before select, HOLD release AND edge fence release.
@@ -14,18 +14,23 @@ export async function verifyMigrationGate(input: MigrationGateInput, now = Date.
   assertIdentity(input.rpc.identity, input.expectedIdentity);
   const identity = input.expectedIdentity;
   const workerSettings = requireWorkerBindingAuthority(input.workerSettings, identity);
+  if (![input.workerDeploymentId, input.workerVersionId].every((id) => typeof id === "string" && /^[a-f0-9-]{36}$/.test(id))) throw new Error("Actual Worker deployment/version unavailable");
   if (source.sourceHead !== input.candidateSha || identity.sourceSha !== input.candidateSha || identity.epoch !== input.epoch ||
     input.admin.apiDatabaseId !== identity.databaseId || input.admin.databaseId !== identity.databaseId || input.admin.bindingNonce !== identity.bindingNonce ||
     input.actualWorkerBundleSha256 !== identity.workerBundleSha256 || !/^[a-f0-9]{64}$/.test(input.activeEnvSha256) || !/^[a-f0-9]{64}$/.test(input.targetConfigSha256)) throw new Error("Candidate, database or configuration identity mismatch");
   await assertMigrationRows(input.admin, source); await assertMigrationRows(input.rpc, source);
   return { verifiedAtMs: now, expiresAtMs: now + 30_000, candidateSha: input.candidateSha, exportSha256: source.sourceSha256,
-    workerSettings, migrationId: source.migrationId, worldCount: source.worlds.length, aliasCount: source.aliases.length, identity,
+    workerSettings, workerDeploymentId: input.workerDeploymentId, workerVersionId: input.workerVersionId, actualWorkerBundleSha256: input.actualWorkerBundleSha256,
+    migrationId: source.migrationId, worldCount: source.worlds.length, aliasCount: source.aliases.length, identity,
     activeEnvSha256: input.activeEnvSha256, targetConfigSha256: input.targetConfigSha256, proofSha256: await sha256(stableJson(input)), adminAndFullRpcVerified: true };
 }
-export function requireFreshMigrationReceipt(receipt: Awaited<ReturnType<typeof verifyMigrationGate>>, expected: Pick<MigrationGateInput, "candidateSha" | "activeEnvSha256" | "targetConfigSha256" | "expectedIdentity" | "workerSettings"> & { exportSha256: string }, now = Date.now()) {
+export function requireFreshMigrationReceipt(receipt: Awaited<ReturnType<typeof verifyMigrationGate>>, expected: Pick<MigrationGateInput, "candidateSha" | "activeEnvSha256" | "targetConfigSha256" | "expectedIdentity" | "workerSettings" | "workerDeploymentId" | "workerVersionId" | "actualWorkerBundleSha256"> & { exportSha256: string }, now = Date.now()) {
   if (!receipt || receipt.adminAndFullRpcVerified !== true || receipt.verifiedAtMs > now || receipt.expiresAtMs <= now || now - receipt.verifiedAtMs > 30_000 || receipt.expiresAtMs - receipt.verifiedAtMs > 30_000 ||
     receipt.candidateSha !== expected.candidateSha || receipt.exportSha256 !== expected.exportSha256 || receipt.activeEnvSha256 !== expected.activeEnvSha256 || receipt.targetConfigSha256 !== expected.targetConfigSha256) throw new Error("Stale or wrong migration receipt");
   assertIdentity(receipt.identity, expected.expectedIdentity);
+  if (![expected.workerDeploymentId, expected.workerVersionId].every((id) => typeof id === "string" && /^[a-f0-9-]{36}$/.test(id)) ||
+    receipt.workerDeploymentId !== expected.workerDeploymentId || receipt.workerVersionId !== expected.workerVersionId ||
+    receipt.actualWorkerBundleSha256 !== expected.actualWorkerBundleSha256 || expected.actualWorkerBundleSha256 !== expected.expectedIdentity.workerBundleSha256) throw new Error("Worker deployment/version/module changed after gate proof");
   if (stableJson(receipt.workerSettings) !== stableJson(requireWorkerBindingAuthority(expected.workerSettings, expected.expectedIdentity))) throw new Error("Worker settings changed after gate proof");
 }
 if (import.meta.main) {

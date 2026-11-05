@@ -248,13 +248,17 @@ test("SYNTHETIC full management/RPC gate rejects wrong empty binding, tampered r
     const response = await (await b.rpc({ op: "migrationSnapshot" })).json();
     const rpc = response.result;
     const input: MigrationGateInput = { source, workerSettings: actualWorkerSettings(), expectedIdentity, admin: { ...structuredClone(rpc), databaseId, apiDatabaseId: databaseId, bindingNonce: expectedIdentity.bindingNonce }, rpc,
-      candidateSha: expectedIdentity.sourceSha, actualWorkerBundleSha256: expectedIdentity.workerBundleSha256, activeEnvSha256: "a".repeat(64), targetConfigSha256: "b".repeat(64), epoch: expectedIdentity.epoch };
+      workerDeploymentId: "11111111-1111-4111-8111-111111111111", workerVersionId: "22222222-2222-4222-8222-222222222222", candidateSha: expectedIdentity.sourceSha, actualWorkerBundleSha256: expectedIdentity.workerBundleSha256, activeEnvSha256: "a".repeat(64), targetConfigSha256: "b".repeat(64), epoch: expectedIdentity.epoch };
     expect(await verifyMigrationGate(input, now)).toMatchObject({ adminAndFullRpcVerified: true, worldCount: 2, aliasCount: 1, expiresAtMs: now + 30_000 });
-    const receipt = await verifyMigrationGate(input, now), expectedReceipt = { candidateSha: input.candidateSha, activeEnvSha256: input.activeEnvSha256, targetConfigSha256: input.targetConfigSha256, expectedIdentity, workerSettings: actualWorkerSettings(), exportSha256: source.sourceSha256 };
+    const receipt = await verifyMigrationGate(input, now), expectedReceipt = { workerDeploymentId: input.workerDeploymentId, workerVersionId: input.workerVersionId, actualWorkerBundleSha256: input.actualWorkerBundleSha256, candidateSha: input.candidateSha, activeEnvSha256: input.activeEnvSha256, targetConfigSha256: input.targetConfigSha256, expectedIdentity, workerSettings: actualWorkerSettings(), exportSha256: source.sourceSha256 };
     expect(() => requireFreshMigrationReceipt(receipt, expectedReceipt, now + 1)).not.toThrow();
     expect(() => requireFreshMigrationReceipt(receipt, expectedReceipt, now + 30_000)).toThrow("Stale");
     expect(() => requireFreshMigrationReceipt(receipt, { ...expectedReceipt, activeEnvSha256: "f".repeat(64) }, now + 1)).toThrow("Stale");
+    for (const key of ["workerDeploymentId", "workerVersionId", "actualWorkerBundleSha256"] as const) {
+      expect(() => requireFreshMigrationReceipt(receipt, { ...expectedReceipt, [key]: key === "actualWorkerBundleSha256" ? "f".repeat(64) : "33333333-3333-4333-8333-333333333333" }, now + 1)).toThrow("Worker");
+    }
     const mutations: ((x: MigrationGateInput) => void)[] = [
+      (x) => { x.workerDeploymentId = ""; }, (x) => { x.workerVersionId = "unknown"; },
       (x) => { x.rpc.worlds = []; x.rpc.aliases = []; }, (x) => { x.rpc.worlds[0].snapshot += " "; }, (x) => { x.rpc.aliases[0].canonical = "wrong/repo"; },
       (x) => { x.rpc.identity.databaseId = "22222222-2222-4222-8222-222222222222"; }, (x) => { x.rpc.identity.epoch = "f".repeat(32); },
       (x) => { x.rpc.identity.admissionFenced = false; }, (x) => { x.actualWorkerBundleSha256 = "e".repeat(64); }, (x) => { x.candidateSha = "e".repeat(40); },
