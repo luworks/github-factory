@@ -30,6 +30,18 @@ const object=(v:unknown):v is Record<string,any>=>!!v&&typeof v==="object"&&!Arr
 const keys=(v:Record<string,unknown>,allowed:readonly string[])=>{for(const k in v)if(Object.hasOwn(v,k)&&!allowed.includes(k))return false;return true;};
 const sha=(v:unknown):v is string=>typeof v==="string"&&/^[a-f0-9]{40}$/.test(v);
 const busy=new WeakSet<object>();
+const idleWaiters=new WeakMap<object,Set<()=>void>>();
+/** Observation only, scoped to the exact original quota object. A waiter sees
+ * the action currently holding that authority, never unlocks it, and is removed
+ * before notification so it cannot clear or subscribe itself to a later action.
+ * idle is a point-in-time observation, not a fence against new manual actions. */
+export function observeHistoryReaderSettlement(authority:object):{readonly idle:boolean;readonly settled:Promise<void>}{
+ if(!authority||(typeof authority!=="object"&&typeof authority!=="function"))throw new TypeError("A trusted history authority object is required.");
+ if(!busy.has(authority))return{idle:true,settled:Promise.resolve()};
+ let waiters=idleWaiters.get(authority);if(!waiters){waiters=new Set();idleWaiters.set(authority,waiters);}
+ const registered=waiters;return{idle:false,settled:new Promise<void>(resolve=>registered.add(resolve))};
+}
+export const waitForHistoryReaderIdle=(authority:object)=>observeHistoryReaderSettlement(authority).settled;
 const cooling=new WeakMap<object,{until:number;clock:()=>number}>();
 const defaultClock=()=>performance.now();
 class Stop extends Error { constructor(readonly code:string,readonly status=502,readonly retryAfter?:number){super(code);} }
@@ -54,7 +66,7 @@ export class HistoryGitHubReader {
   const action=new AbortController(),pending=new Set<Promise<unknown>>();let finished=false,last=NaN,stage="admission";try{last=this.clock();}catch{}
   const started=last,end=started+this.limits.actionMs;
   const check=()=>{let n:number;try{n=this.clock();}catch{throw new Stop("HISTORY_CLOCK_INVALID",503);}if(!Number.isFinite(started)||!Number.isFinite(n)||n<last)throw new Stop("HISTORY_CLOCK_INVALID",503);last=n;if(action.signal.aborted)throw action.signal.reason;if(n>=end)throw new Stop("HISTORY_ACTION_TIMEOUT",504);return n;};
-  const release=()=>{if(finished&&pending.size===0)busy.delete(authority);};
+  const release=()=>{if(finished&&pending.size===0){busy.delete(authority);const waiters=idleWaiters.get(authority);idleWaiters.delete(authority);if(waiters)for(const resolve of waiters)resolve();}};
   const track=<T>(p:Promise<T>)=>{pending.add(p);p.then(()=>{pending.delete(p);release();},()=>{pending.delete(p);release();});return p;};
   const wait=<T>(promise:Promise<T>,signal:AbortSignal):Promise<T>=>new Promise((resolve,reject)=>{const abort=()=>reject(signal.reason instanceof Stop?signal.reason:new Stop("HISTORY_REQUEST_TIMEOUT",504));if(signal.aborted){abort();return;}signal.addEventListener("abort",abort,{once:true});promise.then(v=>{signal.removeEventListener("abort",abort);resolve(v);},e=>{signal.removeEventListener("abort",abort);reject(e);});});
   const actionTimer=setTimeout(()=>action.abort(new Stop("HISTORY_ACTION_TIMEOUT",504)),this.limits.actionMs);

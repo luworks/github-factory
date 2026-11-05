@@ -1,6 +1,6 @@
 import type { HistoryActionResult, HistoryService } from "./history-service";
 
-export const HISTORY_HTTP_RUNTIME_LIFECYCLE = "UNIMPLEMENTED" as const;
+export const HISTORY_HTTP_RUNTIME_LIFECYCLE = "NOT_WIRED" as const;
 export interface HistoryHttpContext { readonly repo: string; readonly path: string; readonly publicOrigin: string }
 export interface HistoryHttpAccess {
   /** authenticate must verify the gateway key and asserted IP, then debit the
@@ -13,12 +13,12 @@ export interface HistoryHttpAccess {
 export type HistoryCleanupRetainer = (pending: Promise<unknown>) => void;
 export interface HistoryHttpLifecycle {
   held(): boolean | Promise<boolean>;
-  /** REQUIRED FUTURE RUNTIME AUTHORITY: retain the original active-analysis
+  /** REQUIRED RUNTIME AUTHORITY (standalone hook exists, not wired): retain the original active-analysis
    * authority through late physical admission/fetch/body cleanup AND durable
    * persistence. act() settlement alone is not physical settlement. retain()
    * reports adapter body reads/cancellation; the existing reader's hidden late
-   * cleanup still needs a separately reviewed real runtime hook. No production
-   * implementation is supplied here. A response timeout never proves drain. */
+   * cleanup is observed by the standalone history-lifecycle hook. Bootstrap
+   * adoption remains separate and unimplemented. A response timeout never proves drain. */
   run<T>(work: (retain: HistoryCleanupRetainer) => Promise<T>): Promise<T>;
 }
 export interface HistoryHttpDependencies {
@@ -112,7 +112,7 @@ function actionPayload(result: HistoryActionResult) {
 }
 
 /** Injected factory only. There is no route, runtime instance, environment/key
- * reader, default access, active counter or production lifecycle implementation. */
+ * reader, default access, active counter or runtime lifecycle registration. */
 export function createHistoryHttp(deps: HistoryHttpDependencies) {
   const timeout = deps.bodyTimeoutMs ?? 5000;
   return async (request: Request, context: HistoryHttpContext): Promise<Response> => {

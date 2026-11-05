@@ -1,5 +1,5 @@
 import {expect,test} from "bun:test";
-import {HistoryGitHubReader,HISTORY_READ_LIMITS,type HistoryReaderDependencies,type HistoryCursorProof} from "../src/server/history-github";
+import {HistoryGitHubReader,HISTORY_READ_LIMITS,observeHistoryReaderSettlement,waitForHistoryReaderIdle,type HistoryReaderDependencies,type HistoryCursorProof} from "../src/server/history-github";
 import {GitHubError,isPublicRepositoryMetadata,type Fetcher} from "../src/server/github";
 import {validateImmutableCommit} from "../src/history/topology";
 const repo="synthetic-history/reader",sha=(n:number)=>n.toString(16).padStart(40,"0"),wall="2025-08-01T00:00:00Z";
@@ -17,6 +17,28 @@ function fixture(options:{intercept?:(url:URL,init:RequestInit)=>Response|undefi
 }
 function proofRoot(unknown=false):HistoryCursorProof{const raw=commit(4),parsed=validateImmutableCommit({schemaVersion:1,repoKey:repo,sha:raw.sha,treeSha:raw.tree.sha,parents:unknown?null:raw.parents.map(p=>p.sha),authorAt:raw.author.date,committerAt:raw.committer.date,message:raw.message,provenance:[{sourceUrl:`https://api.github.com/repos/${repo}/git/commits/${raw.sha}`,fetchedAt:wall}]});if(!parsed.ok)throw Error(parsed.code);return{anchor:{repoKey:repo,sha:sha(4),generation:request().generation},commits:[parsed.value],nextParentSha:unknown?null:sha(3)};}
 const handle=()=>({id:"SYNTHETIC_cursor_1",repoKey:repo,anchorSha:sha(4),generation:request().generation});
+
+test("SYNTHETIC physical observer before/during/after actions never unlocks another authority or a later action",async()=>{
+ let release!:(r:Response)=>void,once=true;const f=fixture({intercept:()=>once?(once=false,new Promise<Response>(r=>release=r)):undefined});
+ expect(observeHistoryReaderSettlement(f.deps.quota).idle).toBe(true);await waitForHistoryReaderIdle(f.deps.quota);
+ const action=f.reader.read(request());await Bun.sleep(0);const a=observeHistoryReaderSettlement(f.deps.quota),b=waitForHistoryReaderIdle(f.deps.quota);let observed=0;a.settled.then(()=>observed++);b.then(()=>observed++);
+ expect(a.idle).toBe(false);expect(observeHistoryReaderSettlement({take(){}}).idle).toBe(true);expect(observed).toBe(0);
+ release(json(metadata()));expect((await action).outcome).toBe("ok");await Promise.all([a.settled,b]);expect(observed).toBe(2);expect(observeHistoryReaderSettlement(f.deps.quota).idle).toBe(true);
+ once=true;const next=f.reader.read(request());await Bun.sleep(0);const later=observeHistoryReaderSettlement(f.deps.quota);expect(later.idle).toBe(false);
+ await a.settled;await b;expect((await new HistoryGitHubReader(f.deps).read(request())).coverage.stopReason).toBe("HISTORY_BUSY");
+ release(json(metadata()));expect((await next).outcome).toBe("ok");await later.settled;expect(observeHistoryReaderSettlement(f.deps.quota).idle).toBe(true);
+ expect((await f.reader.read(request())).outcome).toBe("ok");expect(observeHistoryReaderSettlement(f.deps.quota).idle).toBe(true);
+});
+
+test("SYNTHETIC observer has no idle gap between late transport and pending cancellation, including rejected cleanup",async()=>{
+ for(const rejected of [false,true]){
+  let response!:(r:Response)=>void,settle!:()=>void,once=true,cancelled=0;const cleanup=new Promise<void>((resolve,reject)=>settle=()=>rejected?reject(new Error("SYNTHETIC cleanup rejection")):resolve());
+  const f=fixture({limits:{requestMs:5,actionMs:50},intercept:()=>once?(once=false,new Promise<Response>(r=>response=r)):undefined});
+  expect((await f.reader.read(request())).coverage.stopReason).toBe("HISTORY_REQUEST_TIMEOUT");let idle=false;const observed=waitForHistoryReaderIdle(f.deps.quota).then(()=>{idle=true;});
+  response(new Response(new ReadableStream({cancel(){cancelled++;return cleanup;}})));await Bun.sleep(0);expect(cancelled).toBe(1);expect(idle).toBe(false);expect(observeHistoryReaderSettlement(f.deps.quota).idle).toBe(false);
+  expect((await f.reader.read(request())).coverage.stopReason).toBe("HISTORY_BUSY");settle();await observed;expect(idle).toBe(true);expect(observeHistoryReaderSettlement(f.deps.quota).idle).toBe(true);expect((await f.reader.read(request())).outcome).toBe("ok");
+ }
+});
 
 test("SYNTHETIC bounded history succeeds with one metadata gate, four first-parent details and two pinned trees",async()=>{
  const f=fixture(),r=await f.reader.read(request());expect(r.outcome).toBe("ok");expect(r.commits.map(c=>c.sha)).toEqual([4,3,2,1].map(sha));expect(r.frames.map(t=>t.commitSha)).toEqual([sha(2),sha(4)]);expect(r.frames.every(t=>t.completeness==="full")).toBe(true);expect(r.frames[0].entries.map(e=>e.type)).toContain("symlink");expect(r.frames[0].entries.map(e=>e.type)).toContain("submodule");expect(r.publicRepository?.licenseSpdx).toBe("NOASSERTION");expect(r.coverage).toMatchObject({attempts:7,networkRequests:7,commitSteps:4,newCommits:4,reachedRoot:true,nextParentSha:null,completeHistory:false,errors:[]});expect(f.taken).toBe(7);expect(f.requestAdmits).toBe(1);expect(f.collectionAdmits).toBe(1);expect(f.maxActive).toBe(1);expect(f.events.slice(0,4)).toEqual(["request-admission","collection-admission","quota","fetch"]);for(const call of f.calls){expect(new URL(call.url).origin).toBe("https://api.github.com");expect(call.init.redirect).toBe("error");expect(call.init.method).toBe("GET");expect(new Headers(call.init.headers).has("authorization")).toBe(false);}expect(f.calls.some(c=>/ref\/heads|contents|issues|pulls/.test(c.url))).toBe(false);expect(r.persistence).toBe("not-persisted");

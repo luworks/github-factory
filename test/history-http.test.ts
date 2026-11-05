@@ -63,7 +63,7 @@ test("SYNTHETIC real Request->HTTP->service->reader->store GET/walk/GET/resume/f
     expect(f.requestCharges).toBe(6); expect(f.guards).toBe(6); expect(f.collections).toBe(3); expect(f.quotaTakes).toBe(13); expect(f.calls).toHaveLength(13); expect(f.made).toBe(6); expect(f.runs).toBe(3); expect(f.finishes).toBe(3); expect(f.revokes).toBe(0);
     expect(f.events.slice(0, 3)).toEqual(["authenticate", "request-charge", "service"]);
     for (const name of ["cache-control", "x-content-type-options"]) expect(firstResponse.headers.get(name)).toBe(name === "cache-control" ? "no-store" : "nosniff");
-    expect(HISTORY_HTTP_RUNTIME_LIFECYCLE).toBe("UNIMPLEMENTED");
+    expect(HISTORY_HTTP_RUNTIME_LIFECYCLE).toBe("NOT_WIRED");
   } finally { f.close(); }
 });
 
