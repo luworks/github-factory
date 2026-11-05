@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
-import { worldStorageRpc, type WorldD1Binding } from "../deploy/d1-storage";
+import { worldStorageRpc, type StorageEnvironment, type WorldD1Binding } from "../deploy/d1-storage";
 import gateway from "../deploy/gateway";
 import { D1WorldStore } from "../src/server/d1-store";
 import { createWorldService } from "../src/server/service";
@@ -9,11 +9,16 @@ import { WorldStore } from "../src/server/store";
 import { activePublicAnalyses, publicAnalysis } from "../src/server/runtime-activity";
 import type { Fetcher, RepoCollection } from "../src/server/github";
 import { syntheticWorld } from "./fixtures/browser-world";
+import { exportDigest, type WorldExport } from "../deploy/migration-contract";
+import { requireFreshMigrationReceipt, verifyMigrationGate, type MigrationGateInput } from "../scripts/d1-migration-gate";
 
 // SYNTHETIC ONLY: real SQLite executes the same statements through a D1-shaped
 // interface. These are offline protocol/SQL tests, not Cloudflare acceptance.
 const secret = "synthetic-storage-secret-32-characters-long";
 const endpoint = "https://chaorders.com/github-factory/_storage";
+const databaseId = "11111111-1111-4111-8111-111111111111";
+const expectedIdentity = { databaseId, bindingNonce: "a".repeat(32), epoch: "b".repeat(32), sourceSha: "c".repeat(40), workerBundleSha256: "d".repeat(64), admissionFenced: true };
+const fixtureEnv = { FACTORY_STORAGE_SECRET: secret, FACTORY_STORAGE_DATABASE_ID: databaseId, FACTORY_MIGRATION_EPOCH: expectedIdentity.epoch, FACTORY_SOURCE_SHA: expectedIdentity.sourceSha, FACTORY_WORKER_BUNDLE_SHA256: expectedIdentity.workerBundleSha256, FACTORY_ADMISSION_FENCE: expectedIdentity.epoch };
 const now = Date.parse("2026-11-04T18:00:00Z");
 function fixture(name = "browser-fixture") {
   const world = syntheticWorld(); world.source = "github";
@@ -21,10 +26,12 @@ function fixture(name = "browser-fixture") {
   world.refreshAfter = now + 90_000;
   return world;
 }
-function binding() {
+function binding(options: { interruptBatchAt?: number } = {}) {
   const db = new Database(":memory:");
   db.exec(readFileSync(new URL("../deploy/d1/0001-world-cache.sql", import.meta.url), "utf8"));
-  db.query("INSERT INTO schema_migrations VALUES(1,?,?)").run(new Date(now).toISOString(), "synthetic-schema-hash");
+  db.exec(readFileSync(new URL("../deploy/d1/0002-migration-identity.sql", import.meta.url), "utf8"));
+  db.query("INSERT INTO storage_identity VALUES(1,?,?,?)").run(databaseId, expectedIdentity.bindingNonce, new Date(now).toISOString());
+  db.query("INSERT INTO schema_migrations VALUES(2,?,?)").run(new Date(now).toISOString(), "synthetic-schema-hash");
   const statement = (sql: string, values: unknown[] = []) => ({
     bind(...next: unknown[]) { return statement(sql, next); },
     async all<T>() { return { results: db.query(sql).all(...values as any[]) as T[], success: true }; },
@@ -34,13 +41,14 @@ function binding() {
   });
   const bound: WorldD1Binding = {
     prepare: (sql) => statement(sql),
-    async batch(statements) { return db.transaction(() => statements.map((s) => (s as ReturnType<typeof statement>).execute()))(); },
+    async batch(statements) { return db.transaction(() => statements.map((s, index) => { if (options.interruptBatchAt === index) throw new Error("SYNTHETIC INTERRUPTION"); return (s as ReturnType<typeof statement>).execute(); }))(); },
     withSession() { return bound; },
   };
+  const env: StorageEnvironment = { ...fixtureEnv, WORLDS_DB: bound };
   const ops: string[] = [];
-  const rpc = (operation: unknown, auth = secret) => worldStorageRpc(new Request(endpoint, { method: "POST", headers: { "content-type": "application/json", "x-factory-storage-key": auth }, body: JSON.stringify(operation) }), { WORLDS_DB: bound, FACTORY_STORAGE_SECRET: secret });
-  const network: Fetcher = async (input, init) => { const request = new Request(input, init); ops.push((await request.clone().json() as { op: string }).op); return worldStorageRpc(request, { WORLDS_DB: bound, FACTORY_STORAGE_SECRET: secret }); };
-  return { db, bound, rpc, ops, store: new D1WorldStore({ endpoint, secret }, network) };
+  const rpc = (operation: unknown, auth = secret) => worldStorageRpc(new Request(endpoint, { method: "POST", headers: { "content-type": "application/json", "x-factory-storage-key": auth }, body: JSON.stringify(operation) }), env);
+  const network: Fetcher = async (input, init) => { const request = new Request(input, init); ops.push((await request.clone().json() as { op: string }).op); return worldStorageRpc(request, env); };
+  return { db, bound, rpc, ops, env, store: new D1WorldStore({ endpoint, secret, databaseId }, network) };
 }
 
 test("SYNTHETIC storage RPC has distinct authentication and rejects SQL/prompts, wrong operations and extra fields", async () => {
@@ -72,7 +80,7 @@ test("SYNTHETIC D1 snapshot/alias roundtrip preserves raw evidence, head, expiry
     const summaries = await b.store.summaries([world.repo.fullName, "previous/name", "missing/repo"]);
     expect(summaries).toHaveLength(2); expect(summaries[1]?.repo).toEqual(world.repo);
     expect(summaries[0]).not.toHaveProperty("snapshot");
-    expect(await b.store.status()).toEqual({ backend: "d1", authoritative: true, schemaVersion: 1, worlds: 1, aliases: 1 });
+    expect(await b.store.status()).toEqual({ backend: "d1", authoritative: true, schemaVersion: 2, databaseId, worlds: 1, aliases: 1 });
     await expect(b.store.alias("invalid/alias", "missing/target")).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE" });
     const stored = b.db.query("SELECT snapshot,snapshot_sha256 FROM worlds").get() as { snapshot: string; snapshot_sha256: string };
     expect(stored.snapshot).toBe(JSON.stringify(world)); expect(stored.snapshot_sha256).toBe(new Bun.CryptoHasher("sha256").update(stored.snapshot).digest("hex"));
@@ -124,15 +132,15 @@ test("SYNTHETIC storage probe can touch only its synthetic sentinel and leaves w
 test("SYNTHETIC authoritative D1 failures never fall back to local data or start collection", async () => {
   let collected = 0;
   const failure: Fetcher = async () => { throw new Error("private transport details"); };
-  const store = new D1WorldStore({ endpoint, secret }, failure);
+  const store = new D1WorldStore({ endpoint, secret, databaseId }, failure);
   const service = createWorldService({ store, collector: { async collect(): Promise<RepoCollection> { collected++; throw new Error("not allowed"); } } });
   for (const read of [() => service.getCachedWorld("a/b"), () => service.loadWorld("a/b"), () => service.listFeatured(), () => service.storageStatus()]) {
     await expect(read()).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE", status: 503 });
   }
   expect(collected).toBe(0);
   const malformed: Fetcher = async () => Response.json({ ok: true, backend: "sqlite", op: "getMany", result: [] });
-  await expect(new D1WorldStore({ endpoint, secret }, malformed).get("a/b")).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE" });
-  expect(() => new D1WorldStore({ endpoint: "https://evil.example/_storage", secret })).toThrow();
+  await expect(new D1WorldStore({ endpoint, secret, databaseId }, malformed).get("a/b")).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE" });
+  expect(() => new D1WorldStore({ endpoint: "https://evil.example/_storage", secret, databaseId })).toThrow();
 });
 
 test("SYNTHETIC migration HOLD permits cache reads, blocks new collection/paid actions and counts only public in-flight AI", async () => {
@@ -179,11 +187,86 @@ test("SYNTHETIC async store preserves collection singleflight and drains only af
 
 test("SYNTHETIC successful collection cannot be reported as saved when authoritative D1 put fails", async () => {
   const world = fixture(); let collects = 0;
-  const store = new D1WorldStore({ endpoint, secret }, async (_input, init) => {
+  const store = new D1WorldStore({ endpoint, secret, databaseId }, async (_input, init) => {
     const body = JSON.parse(String(init?.body));
-    return body.op === "getMany" ? Response.json({ ok: true, backend: "d1", op: "getMany", result: [] }) : new Response("unavailable", { status: 503 });
+    return body.op === "getMany" ? Response.json({ ok: true, backend: "d1", op: "getMany", identity: { databaseId }, result: [] }) : new Response("unavailable", { status: 503 });
   });
   const service = createWorldService({ store, collector: { async collect() { collects++; return { repo: world.repo, headSha: world.headSha, collectedAt: world.collectedAt, tree: [], treeState: "unavailable", files: [], issues: [], pulls: [], workflows: [], commits: [], languages: {}, notes: ["SYNTHETIC offline collection"], partial: true, rateLimitRemaining: null }; } } });
   await expect(service.loadWorld(world.repo.fullName)).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE", status: 503 });
   expect(collects).toBe(1); expect(service.activeCollections()).toBe(0);
+});
+
+async function migrationExport(): Promise<WorldExport> {
+  const worlds = [fixture("atomic-a"), fixture("atomic-b")].map((world) => ({ repo: world.repo.fullName, snapshot: JSON.stringify(world), expires_at: now - 999, saved_at: now - 99_000 }));
+  const aliases = [{ alias: "previous/atomic", canonical: worlds[0].repo }];
+  return { migrationId: `worlds-${"e".repeat(32)}`, sourceHead: expectedIdentity.sourceSha, sourceSha256: await exportDigest({ worlds, aliases }), worlds, aliases };
+}
+test("SYNTHETIC atomic migration rolls back worlds, aliases, guard and provenance on interruption", async () => {
+  const b = binding({ interruptBatchAt: 2 }), source = await migrationExport();
+  try {
+    expect((await b.rpc({ op: "migrationImport", export: source, identity: expectedIdentity })).status).toBe(503);
+    for (const table of ["worlds", "world_aliases", "storage_provenance", "migration_guards"]) expect((b.db.query(`SELECT COUNT(*) n FROM ${table}`).get() as { n: number }).n).toBe(0);
+  } finally { b.db.close(); }
+});
+test("SYNTHETIC atomic migration is complete/idempotent, preserves expired TTL and never overwrites unrelated rows", async () => {
+  const b = binding(), source = await migrationExport();
+  try {
+    const request = { op: "migrationImport", export: source, identity: expectedIdentity };
+    expect(await (await b.rpc(request)).json()).toMatchObject({ result: { imported: true, idempotent: false } });
+    expect(await (await b.rpc(request)).json()).toMatchObject({ result: { imported: true, idempotent: true } });
+    expect((await b.store.get(source.worlds[0].repo, now))?.expiresAt).toBe(now - 999);
+    const wrong = structuredClone(source); wrong.worlds[0].snapshot += " "; wrong.sourceSha256 = await exportDigest(wrong);
+    expect((await b.rpc({ ...request, export: wrong })).status).toBe(503);
+    expect((await b.store.status()).worlds).toBe(2);
+  } finally { b.db.close(); }
+  const other = binding();
+  try {
+    await other.store.put(fixture("unrelated"), 90_000, now);
+    expect((await other.rpc({ op: "migrationImport", export: source, identity: expectedIdentity })).status).toBe(503);
+    expect((await other.store.get("synthetic-moonshot/unrelated"))?.world.repo.name).toBe("unrelated");
+    expect((await other.store.status()).worlds).toBe(1);
+  } finally { other.db.close(); }
+});
+test("SYNTHETIC fixed rollback probe proves duplicate-statement failure leaves no sentinel", async () => {
+  const b = binding();
+  try {
+    expect(await (await b.rpc({ op: "probe", action: "rollback", nonce: "f".repeat(32) })).json()).toMatchObject({ result: { batchRejected: true, rolledBack: true, syntheticRowAbsent: true } });
+    expect((b.db.query("SELECT COUNT(*) n FROM migration_sentinels").get() as { n: number }).n).toBe(0);
+  } finally { b.db.close(); }
+});
+test("SYNTHETIC full management/RPC gate rejects wrong empty binding, tampered rows/aliases/config/head/epoch and missing evidence", async () => {
+  const b = binding(), source = await migrationExport();
+  try {
+    await b.rpc({ op: "migrationImport", export: source, identity: expectedIdentity });
+    const response = await (await b.rpc({ op: "migrationSnapshot" })).json();
+    const rpc = response.result;
+    const input: MigrationGateInput = { source, expectedIdentity, admin: { ...structuredClone(rpc), databaseId, apiDatabaseId: databaseId, bindingNonce: expectedIdentity.bindingNonce }, rpc,
+      candidateSha: expectedIdentity.sourceSha, actualWorkerBundleSha256: expectedIdentity.workerBundleSha256, activeEnvSha256: "a".repeat(64), targetConfigSha256: "b".repeat(64), epoch: expectedIdentity.epoch };
+    expect(await verifyMigrationGate(input, now)).toMatchObject({ adminAndFullRpcVerified: true, worldCount: 2, aliasCount: 1, expiresAtMs: now + 30_000 });
+    const receipt = await verifyMigrationGate(input, now), expectedReceipt = { candidateSha: input.candidateSha, activeEnvSha256: input.activeEnvSha256, targetConfigSha256: input.targetConfigSha256, expectedIdentity, exportSha256: source.sourceSha256 };
+    expect(() => requireFreshMigrationReceipt(receipt, expectedReceipt, now + 1)).not.toThrow();
+    expect(() => requireFreshMigrationReceipt(receipt, expectedReceipt, now + 30_000)).toThrow("Stale");
+    expect(() => requireFreshMigrationReceipt(receipt, { ...expectedReceipt, activeEnvSha256: "f".repeat(64) }, now + 1)).toThrow("Stale");
+    const mutations: ((x: MigrationGateInput) => void)[] = [
+      (x) => { x.rpc.worlds = []; x.rpc.aliases = []; }, (x) => { x.rpc.worlds[0].snapshot += " "; }, (x) => { x.rpc.aliases[0].canonical = "wrong/repo"; },
+      (x) => { x.rpc.identity.databaseId = "22222222-2222-4222-8222-222222222222"; }, (x) => { x.rpc.identity.epoch = "f".repeat(32); },
+      (x) => { x.rpc.identity.admissionFenced = false; }, (x) => { x.actualWorkerBundleSha256 = "e".repeat(64); }, (x) => { x.candidateSha = "e".repeat(40); },
+      (x) => { x.admin.worlds[0].expires_at++; }, (x) => { x.admin.provenance = []; }, (x) => { x.admin.apiDatabaseId = "wrong"; }, (x) => { x.targetConfigSha256 = ""; },
+    ];
+    for (const mutate of mutations) { const changed = structuredClone(input); mutate(changed); await expect(verifyMigrationGate(changed)).rejects.toThrow(); }
+    b.db.query("UPDATE storage_identity SET database_uuid=?").run("22222222-2222-4222-8222-222222222222");
+    await expect(b.store.get(source.worlds[0].repo)).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE" });
+  } finally { b.db.close(); }
+});
+
+test("SYNTHETIC whole-export request larger than one MiB imports atomically under the explicit two MiB bound", async () => {
+  const b = binding();
+  try {
+    const worlds = Array.from({ length: 16 }, (_, i) => { const w = fixture(`large-${String(i).padStart(2, "0")}`); w.repo.description = "SYNTHETIC ".repeat(7000); return { repo: w.repo.fullName, snapshot: JSON.stringify(w), expires_at: now - 1, saved_at: now - 99_000 }; });
+    const aliases = [{ alias: "previous/large", canonical: worlds[0].repo }];
+    const source = { migrationId: `worlds-${"9".repeat(32)}`, sourceHead: expectedIdentity.sourceSha, sourceSha256: await exportDigest({ worlds, aliases }), worlds, aliases };
+    const body = { op: "migrationImport", export: source, identity: expectedIdentity };
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(1024 * 1024); expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(2 * 1024 * 1024);
+    expect((await b.rpc(body)).status).toBe(200); expect((await b.store.status()).worlds).toBe(16);
+  } finally { b.db.close(); }
 });

@@ -7,6 +7,7 @@ import { WorldStore, worldStorePath } from "./store";
 import { PublicGitHubQuota } from "./public-quota";
 import { join } from "node:path";
 import { requireOpenSourceLicense } from "./open-source";
+import { isRenderableWorld } from "./world-readiness";
 import { D1WorldStore } from "./d1-store";
 import type { CachedWorld, SnapshotStore, WorldStorageStatus } from "./world-storage";
 import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
@@ -124,12 +125,12 @@ export function createWorldService(options: { collector: Collector; store: Snaps
   };
   const listFeatured = async (): Promise<FeaturedProject[]> => {
     const keys = CURATED_PROJECTS.map((project) => project.fullName.toLowerCase());
-    const summaries = options.store.summaries ? await options.store.summaries(keys) :
-      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now()); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt } : null; }))).filter((row) => row !== null);
+    const summaries = options.store.summaries ? await options.store.summaries(keys, now()) :
+      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now()); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
     const byKey = new Map(summaries.map((row) => [row.key, row]));
     return CURATED_PROJECTS.map((project) => {
       const cached = byKey.get(project.fullName.toLowerCase());
-      return cached && (() => { try { requireOpenSourceLicense(cached.repo.license); return true; } catch { return false; } })()
+      return cached?.ready && (() => { try { requireOpenSourceLicense(cached.repo.license); return true; } catch { return false; } })()
         ? {
             ...project,
             description: cached.repo.description || project.description,
@@ -150,7 +151,7 @@ function service() {
     const config = getConfig();
     singleton = createWorldService({
       collector: new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch)),
-      store: config.worldStore === "d1" ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret }) : new WorldStore(worldStorePath(config.dataDir)),
+      store: config.worldStore === "d1" ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret, databaseId: config.d1DatabaseId }) : new WorldStore(worldStorePath(config.dataDir)),
     });
   }
   return singleton;

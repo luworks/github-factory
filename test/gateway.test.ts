@@ -79,3 +79,18 @@ test("gateway fails closed without a shared secret or platform client IP", async
     expect(mock).not.toHaveBeenCalled();
   } finally { mock.mockRestore(); }
 });
+
+test("edge admission fence rejects every collection/AI path including GET misses but preserves cheap reads and company paths", async () => {
+  const forwarded: string[] = [];
+  const mock = spyOn(globalThis, "fetch").mockImplementation(fakeFetch(async (input) => { forwarded.push(String(input)); return new Response("cheap cached read"); }));
+  const fenced = { ...env, FACTORY_MIGRATION_EPOCH: "a".repeat(32), FACTORY_ADMISSION_FENCE: "a".repeat(32), COMPANY_SITE: { async fetch() { return new Response("company unchanged"); } } };
+  try {
+    for (const [method, path] of [["GET", "/api/world/a/b"], ["HEAD", "/api/world/a/b"], ["POST", "/api/worlds"], ["POST", "/api/world/a/b"], ["POST", "/api/blueprint/a/b"], ["GET", "/api/unknown"], ["POST", "/api/gallery-preview/a/b"]]) {
+      const response = await gateway.fetch(new Request(`https://chaorders.com/github-factory${path}`, { method, headers: { "cf-connecting-ip": "192.0.2.10" } }), fenced);
+      expect(response.status).toBe(503); expect(response.headers.get("x-factory-admission-fence")).toBe(fenced.FACTORY_MIGRATION_EPOCH);
+    }
+    expect(forwarded).toHaveLength(0);
+    for (const path of ["/api/gallery", "/api/gallery-preview/a/b", "/api/health", "/api/budget"]) expect((await gateway.fetch(new Request(`https://chaorders.com/github-factory${path}`, { headers: { "cf-connecting-ip": "192.0.2.10" } }), fenced)).status).toBe(200);
+    expect(await (await gateway.fetch(new Request("https://chaorders.com/github-factory-other"), fenced)).text()).toBe("company unchanged");
+  } finally { mock.mockRestore(); }
+});

@@ -582,3 +582,14 @@ test("a crowded map retains substantial source districts ahead of hidden configu
   expect(world.nodes.at(-1)?.id).toBe("coverage:collapsed");
   expect(world.coverage.notes.join(" ")).toContain("does not establish runtime importance");
 });
+
+test("gallery navigation disables malformed, empty and unavailable cached maps", async () => {
+  const store = new WorldStore(":memory:");
+  const service = createWorldService({ store, now: () => NOW + 1000, collector: { async collect(): Promise<RepoCollection> { throw new Error("must not collect"); } } });
+  try {
+    for (const mutate of [(w: ReturnType<typeof analyzeCollection>) => { w.nodes = []; }, (w: ReturnType<typeof analyzeCollection>) => { w.coverage.tree = "unavailable"; }, (w: ReturnType<typeof analyzeCollection>) => { w.headSha = "invalid"; }, (w: ReturnType<typeof analyzeCollection>) => { w.source = "demo"; }]) {
+      const world = analyzeCollection(monorepo()); world.repo = { ...world.repo, owner: "react", name: "react", fullName: "react/react", url: "https://github.com/react/react" }; mutate(world); store.put(world, 90_000, NOW);
+      expect((await service.listFeatured()).find((project) => project.fullName === "react/react")?.ready).toBe(false);
+    }
+  } finally { store.close(); }
+});

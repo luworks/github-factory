@@ -40,6 +40,7 @@ export function getConfig(env: Record<string, string> = projectEnv()) {
     worldStore: env.MOONSHOT_WORLD_STORE === "d1" ? "d1" : "sqlite",
     d1StorageUrl: env.MOONSHOT_D1_STORAGE_URL || "",
     d1StorageSecret: env.MOONSHOT_D1_STORAGE_SECRET || "",
+    d1DatabaseId: env.MOONSHOT_D1_DATABASE_ID || "",
     // An explicit existing file is required; BudgetLedger never initializes a
     // new file at this path, so migration cannot silently fork paid history.
     ledgerPath: env.MOONSHOT_BUDGET_LEDGER_PATH || undefined,

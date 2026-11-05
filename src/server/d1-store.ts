@@ -10,11 +10,11 @@ type StoredRow = { key: string; repo: string; snapshot: string; expires_at: numb
 export class D1WorldStore implements SnapshotStore {
   private waiting = new Map<string, { now: number; resolve: (entry: CachedWorld | null) => void; reject: (error: unknown) => void }[]>();
   private flushTimer: ReturnType<typeof setTimeout> | undefined;
-  constructor(private config: { endpoint: string; secret: string }, private network: Fetcher = fetch) {
+  constructor(private config: { endpoint: string; secret: string; databaseId: string }, private network: Fetcher = fetch) {
     let endpoint: URL;
     try { endpoint = new URL(config.endpoint); } catch { throw new WorldStorageError(); }
     if (endpoint.origin !== "https://chaorders.com" || endpoint.pathname !== "/github-factory/_storage" || endpoint.search || endpoint.hash ||
-        endpoint.username || endpoint.password || config.secret.length < 32) throw new WorldStorageError();
+        endpoint.username || endpoint.password || config.secret.length < 32 || !/^[a-f0-9-]{36}$/.test(config.databaseId)) throw new WorldStorageError();
   }
   private async rpc<T>(operation: Record<string, unknown>): Promise<T> {
     try {
@@ -26,7 +26,7 @@ export class D1WorldStore implements SnapshotStore {
       finally { await reader.cancel().catch(() => {}); }
       const bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       const result = JSON.parse(new TextDecoder().decode(bytes));
-      if (result.ok !== true || result.backend !== "d1" || result.op !== operation.op) throw new WorldStorageError();
+      if (result.ok !== true || result.backend !== "d1" || result.op !== operation.op || result.identity?.databaseId !== this.config.databaseId) throw new WorldStorageError();
       return result.result as T;
     } catch { throw new WorldStorageError(); }
   }
@@ -65,7 +65,7 @@ export class D1WorldStore implements SnapshotStore {
     const keys = repos.map((repo) => parseRepo(repo).fullName.toLowerCase());
     const rows = await this.rpc<WorldSummary[]>({ op: "summaries", keys });
     if (!Array.isArray(rows)) throw new WorldStorageError();
-    for (const row of rows) if (!row || !keys.includes(row.key) || !row.repo || !Number.isFinite(Date.parse(row.collectedAt)) || !Number.isSafeInteger(row.expiresAt)) throw new WorldStorageError();
+    for (const row of rows) if (!row || !keys.includes(row.key) || !row.repo || !Number.isFinite(Date.parse(row.collectedAt)) || !Number.isSafeInteger(row.expiresAt) || typeof row.ready !== "boolean") throw new WorldStorageError();
     return rows;
   }
   async put(world: WorldSnapshot, ttlMs = 90_000, now = Date.now()) {
@@ -77,7 +77,7 @@ export class D1WorldStore implements SnapshotStore {
   async delete(repo: string) { const result = await this.rpc<{ deleted: boolean }>({ op: "delete", repo: parseRepo(repo).fullName.toLowerCase() }); if (result.deleted !== true) throw new WorldStorageError(); }
   async status() {
     const status = await this.rpc<WorldStorageStatus>({ op: "status" });
-    if (status.backend !== "d1" || status.authoritative !== true || status.schemaVersion !== 1 || !Number.isInteger(status.worlds) || !Number.isInteger(status.aliases)) throw new WorldStorageError();
+    if (status.backend !== "d1" || status.authoritative !== true || status.schemaVersion !== 2 || status.databaseId !== this.config.databaseId || !Number.isInteger(status.worlds) || !Number.isInteger(status.aliases)) throw new WorldStorageError();
     return status;
   }
 }

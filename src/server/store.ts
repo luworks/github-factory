@@ -3,6 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { WorldSnapshot } from "../contracts";
 import { parseRepo } from "./github";
+import { isRenderableWorld } from "./world-readiness";
 import type { CachedWorld, WorldSummary, WorldStorageStatus } from "./world-storage";
 export type { CachedWorld } from "./world-storage";
 
@@ -43,8 +44,8 @@ export class WorldStore {
       return null;
     }
   }
-  summaries(repos: string[]): WorldSummary[] {
-    return repos.flatMap((key) => { const entry = this.get(key); return entry ? [{ key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt }] : []; });
+  summaries(repos: string[], now = Date.now()): WorldSummary[] {
+    return repos.flatMap((key) => { const entry = this.get(key); return entry ? [{ key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now) }] : []; });
   }
   status(): WorldStorageStatus {
     const worlds = this.db.query("SELECT COUNT(*) count FROM worlds").get() as { count: number };

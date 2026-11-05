@@ -12,6 +12,16 @@ export default {
     if (!(publicUrl.pathname === "/github-factory" || publicUrl.pathname.startsWith("/github-factory/")))
       return env.COMPANY_SITE?.fetch(request) ?? new Response("Not found", { status: 404 });
     if (publicUrl.pathname === "/github-factory/_storage") return worldStorageRpc(request, env);
+    // Before retiring a legacy Bun process, close every admission path that can
+    // collect or generate. Cached gallery/preview reads remain available until
+    // the dedicated connector is stopped to close already accepted slow bodies.
+    if (env.FACTORY_ADMISSION_FENCE) {
+      const cheapRead = ["GET", "HEAD"].includes(request.method) && (
+        ["/github-factory/api/gallery", "/github-factory/api/budget", "/github-factory/api/health"].includes(publicUrl.pathname) ||
+        /^\/github-factory\/api\/gallery-preview\/[^/]+\/[^/]+$/.test(publicUrl.pathname));
+      if (publicUrl.pathname.startsWith("/github-factory/api/") && !cheapRead || !["GET", "HEAD"].includes(request.method))
+        return Response.json({ error: "A short world storage maintenance is in progress. New analysis is temporarily unavailable.", code: "STORAGE_MIGRATION_HOLD", epoch: env.FACTORY_MIGRATION_EPOCH }, { status: 503, headers: { "cache-control": "no-store", "retry-after": "60", "x-factory-admission-fence": env.FACTORY_MIGRATION_EPOCH || "unverified" } });
+    }
     if (!["GET", "HEAD", "POST"].includes(request.method))
       return new Response("Method not allowed", { status: 405, headers: { allow: "GET, HEAD, POST" } });
     if (publicUrl.pathname === "/github-factory") {
