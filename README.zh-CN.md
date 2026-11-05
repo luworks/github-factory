@@ -13,7 +13,7 @@
 
 [![MIT](https://img.shields.io/badge/license-MIT-87977b?style=flat-square)](LICENSE)
 [![Bun 1.4.4](https://img.shields.io/badge/Bun-1.4.4-253931?style=flat-square)](https://bun.sh)
-[![中英双语](https://img.shields.io/badge/languages-EN%20%2F%20中文-b5a07a?style=flat-square)](README.md)
+[![界面仅英文](https://img.shields.io/badge/interface-English-b5a07a?style=flat-square)](docs/PRODUCT.md)
 
 [![Moon Factory 官网与月球风格架构地图](docs/assets/readme/landing.webp)](https://chaorders.com/github-factory/)
 
