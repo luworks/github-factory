@@ -30,7 +30,7 @@ test("SYNTHETIC Atlas two-repository cached round trips preserve identity/source
     for (const [i, key] of keys.slice(0, 2).entries()) {
         await row(page, key).click();
         const card = page.locator(".atlas-card");
-        await expect(card.getByText("Discovered this session · No Exploration star awarded.", { exact: true })).toBeVisible();
+        await expect(card.getByText("Discovered on this device · No Exploration star awarded.", { exact: true })).toBeVisible();
         await expect(card.getByRole("link", { name: "GitHub source" })).toHaveAttribute("href", worlds[i].repo.url);
         await expect(card).toContainText("Stale capture · current state unknown");
         await expect(card).toContainText("Historical trees unavailable");
@@ -41,7 +41,7 @@ test("SYNTHETIC Atlas two-repository cached round trips preserve identity/source
         const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem("moonfactory.atlas.session.v1")!));
         await card.getByRole("link", { name: "Enter cached world" }).click();
         await expect(page).toHaveURL(new RegExp(`/world/${key}\\?`));
-        await expect(page.locator(".explorer-visit-status")).toContainText("Visited this session");
+        await expect(page.locator(".explorer-visit-status")).toContainText("Visited on this device");
         await expect(page.locator(".explorer-visit-status")).toContainText("No Exploration star");
         await page.locator(".district-list").getByRole("button", { name: /SYNTHETIC 源码/ }).click();
         const inspector = page.locator(".inspector");
@@ -52,7 +52,7 @@ test("SYNTHETIC Atlas two-repository cached round trips preserve identity/source
             await expect(inspector.locator(".path-label")).toHaveText("packages/源码");
         }
         await page.getByRole("link", { name: "Back to Atlas", exact: true }).click();
-        await expect(page.locator(".atlas-card")).toContainText("Visited this session");
+        await expect(page.locator(".atlas-card")).toContainText("Visited on this device");
         await expect(row(page, key)).toBeFocused();
         const after = await page.evaluate(() => JSON.parse(sessionStorage.getItem("moonfactory.atlas.session.v1")!));
         expect(after.centerX).toBeCloseTo(before.centerX, 5);
@@ -110,7 +110,7 @@ for (const width of [320, 390, 768])
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect(await page.locator(".atlas-card").evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
         await page.getByRole("link", { name: "Enter cached world" }).click();
-        await expect(page.locator(".explorer-visit-status")).toContainText("Visited this session");
+        await expect(page.locator(".explorer-visit-status")).toContainText("Visited on this device");
         await page.getByRole("link", { name: "Back to Atlas", exact: true }).click();
         await expect(row(page, keys[1])).toBeFocused();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

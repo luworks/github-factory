@@ -6,6 +6,7 @@ interface Props {
     landmarks: Landmark[];
     statuses: Map<string, CacheStatus>;
     selected: string | null;
+    lit?: ReadonlySet<string>;
     initialView?: {
         centerX: number;
         centerY: number;
@@ -74,7 +75,7 @@ export function AtlasCanvas(props: Props) {
             lastPaint = now;
             const { size, camera } = view.current, ratio = cv.width / size.width;
             context.setTransform(ratio, 0, 0, ratio, 0, 0);
-            targets.current = paintAtlas(context, data.current.landmarks, camera, size, data.current.statuses, data.current.selected, hoverKey.current);
+            targets.current = paintAtlas(context, data.current.landmarks, camera, size, data.current.statuses, data.current.selected, hoverKey.current, data.current.lit);
         };
         invalidate.current = request;
         commitView.current = (camera, commit = false) => { view.current.camera = constrain(camera, view.current.size); data.current.onView(view.current.camera, fit(homeBounds(data.current.landmarks), view.current.size).zoom, commit); request(); };
@@ -117,7 +118,7 @@ export function AtlasCanvas(props: Props) {
         return () => { disposed = true; stop(); observer.disconnect(); intersection.disconnect(); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", blur); cv.removeEventListener("wheel", wheel); if (hoverTimer.current)
             clearTimeout(hoverTimer.current); cv.width = 0; cv.height = 0; invalidate.current = () => { }; commitView.current = () => { }; };
     }, []);
-    useEffect(() => { invalidate.current(); }, [props.landmarks, props.statuses, props.selected]);
+    useEffect(() => { invalidate.current(); }, [props.landmarks, props.statuses, props.selected, props.lit]);
     useEffect(() => { if (props.locateRequest)
         locate(props.locateRequest.key); }, [props.locateRequest, props.landmarks]);
     const point = (e: ReactPointerEvent<HTMLCanvasElement>) => { const r = e.currentTarget.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };

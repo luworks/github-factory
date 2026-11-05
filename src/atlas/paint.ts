@@ -65,7 +65,7 @@ function sculpture(g: CanvasRenderingContext2D, x: number, y: number, size: numb
     g.restore();
 }
 /** Original vector scenery. No textures, tile cache, physics or cross-repo graph. */
-export function paintAtlas(g: CanvasRenderingContext2D, points: Landmark[], camera: Camera, size: Size, statuses: Map<string, CacheStatus>, selected: string | null, hover: string | null) {
+export function paintAtlas(g: CanvasRenderingContext2D, points: Landmark[], camera: Camera, size: Size, statuses: Map<string, CacheStatus>, selected: string | null, hover: string | null, lit: ReadonlySet<string> = new Set()) {
     g.fillStyle = C.bg;
     g.fillRect(0, 0, size.width, size.height);
     g.save();
@@ -144,6 +144,11 @@ export function paintAtlas(g: CanvasRenderingContext2D, points: Landmark[], came
             g.strokeStyle = active ? C.focus : C.text;
             g.lineWidth = 2;
             g.stroke();
+        }
+        if (group.keys.some(key => lit.has(key))) {
+            g.strokeStyle = C.focus; g.fillStyle = C.surface; g.lineWidth = 2;
+            g.beginPath(); g.arc(x + extent * .42, y - extent * .5, 12, 0, Math.PI * 2); g.fill(); g.stroke();
+            g.fillStyle = C.text; g.font = '600 16px ui-monospace,monospace'; g.textAlign = "center"; g.textBaseline = "middle"; g.fillText("✧", x + extent * .42, y - extent * .5);
         }
         targets.push({ keys: group.keys, x, y, rects: [{ x: x - Math.max(22, extent * .65), y: y - Math.max(22, extent * .8), width: Math.max(44, extent * 1.3), height: Math.max(44, extent * 1.15) }] });
     }

@@ -10,15 +10,16 @@ export interface WorldCanvasProps {
   onSelect: (id: string | null) => void;
   className?: string;
   onRendered?: () => void;
+  paused?: boolean;
 }
-export function WorldCanvas({ world, style, selectedId, onSelect, className = "", onRendered }: WorldCanvasProps) {
+export function WorldCanvas({ world, style, selectedId, onSelect, className = "", onRendered, paused = false }: WorldCanvasProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
     box = useRef<HTMLDivElement>(null),
     cam = useRef({ x: 0, y: 0, k: 1 });
   const drag = useRef<{ id: number; x: number; y: number; cx: number; cy: number; moved: boolean } | null>(null);
-  const data = useRef({ world, style, selectedId, onSelect, onRendered });
+  const data = useRef({ world, style, selectedId, onSelect, onRendered, paused });
   const renderedIdentity = useRef("");
-  data.current = { world, style, selectedId, onSelect, onRendered };
+  data.current = { world, style, selectedId, onSelect, onRendered, paused };
   const layoutIdentity = useRef("");
   const placed = useRef<PlacedNode[]>([]),
     hover = useRef<string | null>(null),
@@ -133,9 +134,9 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       scene.setTransform(resolution * c.k, 0, 0, resolution * c.k, resolution * c.x, resolution * c.y);
       scene.imageSmoothingEnabled = s !== "red-alert";
       if (ground) scene.drawImage(ground, -1400, -900);
-      paintConnections(scene, placed.current, w.edges, s, now / 1000, !motion.matches);
+      paintConnections(scene, placed.current, w.edges, s, now / 1000, !motion.matches && !data.current.paused);
       for (const pn of placed.current.toSorted((a, b) => a.y - b.y))
-        paintBuilding(scene, pn, s, sel === pn.node.id, hover.current === pn.node.id, motion.matches ? 0 : now / 1000);
+        paintBuilding(scene, pn, s, sel === pn.node.id, hover.current === pn.node.id, motion.matches || data.current.paused ? 0 : now / 1000);
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (s === "red-alert") {
         g.imageSmoothingEnabled = false;

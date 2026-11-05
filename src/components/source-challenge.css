@@ -1,0 +1,17 @@
+.source-challenge { padding: 20px; border-top: 1px solid var(--geist-border); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.source-challenge h3 { margin: 0 0 10px; font-size: 16px; }
+.source-challenge p { margin: 10px 0; }
+.source-challenge fieldset { margin: 14px 0; padding: 10px; border: 1px solid var(--geist-border); min-width: 0; }
+.source-challenge legend { font-weight: 600; }
+.source-challenge label { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 0; cursor: pointer; }
+.source-challenge input { flex-shrink: 0; width: 18px; height: 18px; }
+.source-challenge button { min-height: 44px; padding: 10px 12px; border: 1px solid var(--geist-border); border-radius: 6px; margin: 4px; background: var(--geist-surface); color: inherit; }
+.source-challenge code { font-size: 12px; }
+.exploration-receipt { border: 1px solid currentColor; border-radius: 6px; padding: 12px; }
+.progress-warning { font-weight: 600; }
+.atlas-progress-controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; padding: 12px 24px; font-size: 13px; }
+.atlas-progress-controls button { min-height: 44px; padding: 8px 12px; }
+.atlas-lantern { padding: 10px; border: 1px solid currentColor; border-radius: 6px; }
+
+.source-challenge-toggle { min-height:44px; padding:8px 12px; margin-left:12px; }
+@media(max-width:900px) { .inspector.challenge-open { display:flex; } }

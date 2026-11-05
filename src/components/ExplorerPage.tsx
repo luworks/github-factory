@@ -3,6 +3,7 @@ import { cachedWorldReady, worldIdentity } from "../evidence/captured";
 import { readAtlasSession, validatedReturnToken } from "../atlas/session";
 import { noteExploration, subscribeExploration, explorationFlags } from "../progression/session";
 import "../atlas/atlas.css";
+import { SourceChallenge } from "./SourceChallenge";
 import { appPath } from "../base-path";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -76,6 +77,8 @@ export function ExplorerPage({
   const [atlasToken,setAtlasToken] = useState<string|null>(null), [,setProgressRevision] = useState(0);
   const loadGeneration = useRef(0);
   const cachedOnly = readMode === "cached";
+  const [sourceVerified,setSourceVerified] = useState(false);
+  const [motionPaused,setMotionPaused] = useState(false), [challengeOpen,setChallengeOpen] = useState(false);
   const [world, setWorld] = useState<WorldSnapshot | null>(null),
     [error, setError] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false),
@@ -101,9 +104,10 @@ export function ExplorerPage({
         if (generation !== loadGeneration.current) return;
         if (cachedOnly && !cachedWorldReady(next)) throw new Error("This cached capture cannot be verified for exploration.");
         setWorld(next);
+        setSourceVerified(true);
         setError(null);
       } catch (e) {
-        if (generation === loadGeneration.current) setError(e instanceof Error ? e.message : "The repository could not be loaded.");
+        if (generation === loadGeneration.current) { setSourceVerified(false); setError(e instanceof Error ? e.message : "The repository could not be loaded."); }
       } finally {
         if (generation === loadGeneration.current) setRefreshing(false);
       }
@@ -112,6 +116,7 @@ export function ExplorerPage({
   );
   useEffect(() => {
     let active = true;
+    setWorld(null); setSelected(null); setSourceVerified(false);
     void load();
     if (!cachedOnly && readMode !== "invalid")     getBudget()
       .then((b) => {
@@ -177,6 +182,7 @@ export function ExplorerPage({
     <div className={`explorer explorer-${style}`}>
       <header className="explorer-header">
         <Brand compact />
+        {cachedOnly && <button className="share-button" onClick={() => setMotionPaused(x=>!x)} aria-pressed={motionPaused}>{motionPaused ? "Resume motion" : "Pause motion"}</button>}
         {cachedOnly && <Link className="explorer-atlas-back" to="/atlas" search={atlasToken ? {atlasReturn:atlasToken} : {home:"1"}} preload={false}>Back to Atlas</Link>}
         <span className="breadcrumb-divider">/</span>
         <a className="repo-breadcrumb" href={world?.repo.url ?? `https://github.com/${owner}/${repo}`} target="_blank" rel="noreferrer">
@@ -195,7 +201,7 @@ export function ExplorerPage({
           </button>
         </div>
       </header>
-      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? "Visited this session" : "Rendering cached world"} · No Exploration star awarded for entry.</div>}
+      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? "Visited on this device" : "Rendering cached world"} · No Exploration star awarded for entry. <button className="source-challenge-toggle" aria-pressed={challengeOpen} onClick={() => setChallengeOpen(x=>!x)}>{challengeOpen ? "Hide source challenge" : "Show source challenge"}</button></div>}
       {!world ? (
         <main className="world-loading">
           {error ? (
@@ -338,7 +344,7 @@ export function ExplorerPage({
             <section className="world-stage">
               {tab === "world" ? (
                 <>
-                  <WorldCanvas world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
+                  <WorldCanvas paused={motionPaused} world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
                   <div className="stage-heading">
                     <span className="stage-eyebrow">{styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
                     <h1>
@@ -548,7 +554,8 @@ export function ExplorerPage({
                 ))}
               </div>
             </section>
-            <aside className="inspector">
+            <aside className={`inspector${challengeOpen ? " challenge-open" : ""}`}>
+              {cachedOnly && <SourceChallenge world={world} available={sourceVerified} onSelect={select}/>}
               <div className="inspector-title">
                 <span>{selected ? ("DISTRICT INTELLIGENCE") : "WORLD INTELLIGENCE"}</span>
                 {selected && (
