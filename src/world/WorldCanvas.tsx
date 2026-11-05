@@ -21,6 +21,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
   const renderedIdentity = useRef("");
   data.current = { world, style, selectedId, onSelect, onRendered, paused };
   const layoutIdentity = useRef("");
+  const invalidate = useRef(() => {}), reconcileMotion = useRef(() => {});
   const placed = useRef<PlacedNode[]>([]),
     hover = useRef<string | null>(null),
     size = useRef({ w: 1000, h: 700 }),
@@ -33,6 +34,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       x: w / 2 - (b.x + b.width / 2) * Math.min(w / b.width, h / b.height) * 0.88,
       y: h / 2 - (b.y + b.height / 2) * Math.min(w / b.width, h / b.height) * 0.88,
     };
+    invalidate.current();
   };
   useEffect(() => {
     const identity = `${world.repo.fullName}:${style}:${world.nodes
@@ -46,6 +48,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       hover.current = null;
       setTip(null);
     }
+    invalidate.current();
   }, [world.repo.fullName, world.nodes, style]);
   useEffect(() => {
     const node = placed.current.find((p) => p.node.id === selectedId);
@@ -57,6 +60,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     if (x < 100 || x > w - 100 || y < 125 || y > h - 85) {
       cam.current = { ...c, x: w / 2 - node.x * c.k, y: h / 2 + 30 - node.y * c.k };
     }
+    invalidate.current();
   }, [selectedId]);
   useEffect(() => {
     const cv = canvas.current,
@@ -64,30 +68,41 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     if (!cv || !el) return;
     const g = cv.getContext("2d");
     if (!g) return;
-    let frame = 0,
-      stopped = false,
-      last = 0;
-    let ground: HTMLCanvasElement | null = null,
-      groundKey = "";
-    const resize = () => {
-      const r = el.getBoundingClientRect(),
-        dpr = Math.min(2, window.devicePixelRatio || 1);
-      size.current = { w: r.width, h: r.height };
-      cv.width = Math.round(r.width * dpr);
-      cv.height = Math.round(r.height * dpr);
-      reset();
-    };
-    const observer = new ResizeObserver(resize);
-    observer.observe(el);
-    resize();
-    const retro = document.createElement("canvas");
-    const retroContext = retro.getContext("2d")!;
+    let frame = 0, stopped = false, visible = false, dirty = true, sized = false;
+    let lastPaint = -Infinity, animationTime = 0, previousAnimationPaint: number | null = null;
+    let ground: HTMLCanvasElement | null = null, groundKey = "";
+    const retro = document.createElement("canvas"), retroContext = retro.getContext("2d")!;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const animated = () => !motion.matches && !data.current.paused;
+    let previousMode = animated();
+    const eligible = () => !stopped && visible && !document.hidden && size.current.w > 0 && size.current.h > 0 && el.clientWidth > 0 && el.clientHeight > 0;
+    const request = () => { if (!frame && eligible() && (dirty || animated())) frame = requestAnimationFrame(draw); };
+    const stop = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = 0; previousAnimationPaint = null;
+      const pointer = drag.current?.id;
+      drag.current = null; hover.current = null; if (!stopped) setTip(null); dirty = true;
+      if (pointer !== undefined && cv.hasPointerCapture(pointer)) cv.releasePointerCapture(pointer);
+    };
+    invalidate.current = () => { dirty = true; request(); };
+    reconcileMotion.current = () => { const next = animated(); if (next !== previousMode) stop(); previousMode = next; dirty = true; request(); };
+    const resize = () => {
+      const r = el.getBoundingClientRect(), old = size.current;
+      if (r.width < 1 || r.height < 1) { stop(); return; }
+      if (sized && r.width === old.w && r.height === old.h) return;
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      size.current = { w: r.width, h: r.height };
+      cv.width = Math.round(r.width * dpr); cv.height = Math.round(r.height * dpr);
+      if (!sized) reset();
+      else { cam.current.x += (r.width - old.w) / 2; cam.current.y += (r.height - old.h) / 2; }
+      sized = true; dirty = true; request();
+    };
     const draw = (now: number) => {
-      if (stopped) return;
-      frame = requestAnimationFrame(draw);
-      if (now - last < 1000 / 30 || document.hidden) return;
-      last = now - ((now - last) % (1000 / 30));
+      frame = 0;
+      if (!eligible() || !dirty && !animated()) return;
+      if (!dirty && now - lastPaint < 1000 / 30) { request(); return; }
+      if (animated() && previousAnimationPaint !== null) animationTime += Math.max(0, now - previousAnimationPaint);
+      previousAnimationPaint = animated() ? now : null; lastPaint = Number.isFinite(lastPaint) ? now - ((now - lastPaint) % (1000 / 30)) : now; dirty = false;
       const { world: w, style: s, selectedId: sel } = data.current,
         p = PALETTES[s],
         dpr = Math.min(2, window.devicePixelRatio || 1),
@@ -134,9 +149,9 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       scene.setTransform(resolution * c.k, 0, 0, resolution * c.k, resolution * c.x, resolution * c.y);
       scene.imageSmoothingEnabled = s !== "red-alert";
       if (ground) scene.drawImage(ground, -1400, -900);
-      paintConnections(scene, placed.current, w.edges, s, now / 1000, !motion.matches && !data.current.paused);
+      paintConnections(scene, placed.current, w.edges, s, animationTime / 1000, !motion.matches && !data.current.paused);
       for (const pn of placed.current.toSorted((a, b) => a.y - b.y))
-        paintBuilding(scene, pn, s, sel === pn.node.id, hover.current === pn.node.id, motion.matches || data.current.paused ? 0 : now / 1000);
+        paintBuilding(scene, pn, s, sel === pn.node.id, hover.current === pn.node.id, animationTime / 1000);
       g.setTransform(dpr, 0, 0, dpr, 0, 0);
       if (s === "red-alert") {
         g.imageSmoothingEnabled = false;
@@ -150,8 +165,14 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       paintLabels(g, placed.current, s, sel, hover.current, c);
       const identity = JSON.stringify([w.repo.fullName, w.headSha, w.collectedAt, w.source]);
       if (identity !== renderedIdentity.current) { renderedIdentity.current = identity; data.current.onRendered?.(); }
+      request();
     };
-    frame = requestAnimationFrame(draw);
+    const observer = new ResizeObserver(resize); observer.observe(el); resize();
+    const intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? false; if (visible) { dirty = true; request(); } else stop(); });
+    intersection.observe(el);
+    const visibility = () => { if (document.hidden) stop(); else { dirty = true; request(); } };
+    const media = () => reconcileMotion.current();
+    document.addEventListener("visibilitychange", visibility); motion.addEventListener("change", media);
     const wheel = (e: WheelEvent) => {
       e.preventDefault();
       const r = cv.getBoundingClientRect(),
@@ -160,15 +181,18 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
         c = cam.current,
         k = Math.max(0.18, Math.min(2.5, c.k * (e.deltaY < 0 ? 1.12 : 0.89)));
       cam.current = { x: x - ((x - c.x) * k) / c.k, y: y - ((y - c.y) * k) / c.k, k };
+      invalidate.current();
     };
     cv.addEventListener("wheel", wheel, { passive: false });
     return () => {
-      stopped = true;
-      cancelAnimationFrame(frame);
-      observer.disconnect();
+      stopped = true; stop();
+      observer.disconnect(); intersection.disconnect();
+      document.removeEventListener("visibilitychange", visibility); motion.removeEventListener("change", media);
+      invalidate.current = () => {}; reconcileMotion.current = () => {};
       cv.removeEventListener("wheel", wheel);
     };
   }, []);
+  useEffect(() => { reconcileMotion.current(); }, [world, style, selectedId, paused]);
   const pos = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const r = e.currentTarget.getBoundingClientRect(),
       c = cam.current;
@@ -188,30 +212,34 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       if (Math.abs(dx) + Math.abs(dy) > 4) d.moved = true;
       cam.current.x = d.cx + dx;
       cam.current.y = d.cy + dy;
+      invalidate.current();
       return;
     }
     const p = pos(e);
     const id = pickNode(placed.current, p.x, p.y);
     hover.current = id;
     setTip(id);
+    invalidate.current();
   };
   const up = (e: ReactPointerEvent<HTMLCanvasElement>) => {
     const d = drag.current;
     if (!d || d.id !== e.pointerId) return;
     drag.current = null;
+    invalidate.current();
     if (!d.moved) {
       const p = pos(e);
       onSelect(pickNode(placed.current, p.x, p.y));
     }
   };
   const cancel = (id: number) => {
-    if (drag.current?.id === id) drag.current = null;
+    if (drag.current?.id === id) { drag.current = null; invalidate.current(); }
   };
   const zoom = (factor: number) => {
     const c = cam.current,
       { w, h } = size.current,
       k = Math.max(0.18, Math.min(2.5, c.k * factor));
     cam.current = { x: w / 2 - ((w / 2 - c.x) * k) / c.k, y: h / 2 - ((h / 2 - c.y) * k) / c.k, k };
+    invalidate.current();
   };
   return (
     <div className={`world-canvas-wrap style-${style} ${className}`} ref={box}>
@@ -229,6 +257,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
         onPointerLeave={() => {
           hover.current = null;
           setTip(null);
+          invalidate.current();
         }}
         onKeyDown={(e) => {
           if (e.key === "0") {
@@ -244,6 +273,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
           if (e.key === "ArrowRight") p.x -= 30;
           if (e.key === "ArrowUp") p.y += 30;
           if (e.key === "ArrowDown") p.y -= 30;
+          if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) invalidate.current();
         }}
       />
       <div
