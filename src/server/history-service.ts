@@ -106,7 +106,9 @@ export class HistoryService {
     const page = input.offset ? await this.deps.store.page(c.anchor, input.offset as number, L.page) : first;
     if (!sameCursor(page.cursor, first.cursor) || !sameCursor(await this.revision(c), first.cursor)) return reject("HISTORY_CONTEXT_DRIFT");
     await this.current(c);
-    return { capture: c, history: page, token: await this.token(c, first.cursor.revision), frames };
+    const token = await this.token(c, first.cursor.revision);
+    await this.current(c);
+    return { capture: c, history: page, token, frames };
     } catch (error) {
       if (error instanceof HistoryServiceError) throw error;
       const e = error as { code?: string };
@@ -156,12 +158,22 @@ export class HistoryService {
         await this.current(c);
         const saved = await this.deps.store.append({ anchor: c.anchor, batchId: `${actionId}_${suffix}`, actionId: `${actionId}_${suffix}`, expectedRevision: cursor.revision, expectedCursor: cursor, unit });
         cursor = saved.currentCursor; result.persisted.cursor = cursor; result.persisted.batches++; result.status = "partially-saved";
+        if (unit.kind === "commits") result.persisted.commits += unit.commits.length;
+        else result.persisted.frames += unit.frames.length;
+        // SnapshotStore and HistoryStore are separate authorities. A capture
+        // change cannot cancel an already-started append. Preserve confirmed
+        // old-anchor counts/receipts and report partial/stale, never fake rollback.
+        await this.current(c);
       };
-      if (commits.length) { await save({ kind: "commits", complete: true, commits }, "commits"); result.persisted.commits = commits.length; }
-      if (result.observed.frames.length) { await save({ kind: "frames", complete: true, frames: result.observed.frames }, "frames"); result.persisted.frames = result.observed.frames.length; }
+      if (commits.length) await save({ kind: "commits", complete: true, commits }, "commits");
+      if (result.observed.frames.length) await save({ kind: "frames", complete: true, frames: result.observed.frames }, "frames");
+      const token = await this.token(c, cursor.revision);
+      await this.current(c);
       result.status = result.persisted.batches ? "saved" : "not-saved";
-      result.token = await this.token(c, cursor.revision);
+      result.token = token;
     } catch (error) {
+      result.token = null;
+      result.status = result.persisted.batches ? "partially-saved" : "not-saved";
       const e = error as { code?: string; status?: number; retryAfter?: number; message?: string };
       result.error = { code: e.code ?? "HISTORY_UNAVAILABLE", status: e.status ?? (e.code?.includes("conflict") ? 409 : e.code?.endsWith("-cap") ? 429 : 503), message: error instanceof HistoryServiceError ? error.message : "History storage or admission is unavailable. No automatic retry was attempted.", ...(e.retryAfter !== undefined ? { retryAfter: e.retryAfter } : {}) };
     } finally { if (held) busy.delete(authority); }

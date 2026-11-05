@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { readFileSync } from "node:fs";
 import { D1HistoryStore, type HistoryD1Binding } from "../deploy/history-storage";
 import { HistoryService, type HistoryServiceDependencies } from "../src/server/history-service";
-import { HistoryCursorCodec } from "../src/server/history-cursor";
+import { HistoryCursorCodec, type HistoryCursorClaim } from "../src/server/history-cursor";
 import { GitHubError } from "../src/server/github";
 import { validateImmutableCommit } from "../src/history/topology";
 import { syntheticWorld } from "./fixtures/browser-world";
@@ -230,5 +230,110 @@ test("SYNTHETIC 500-fact proof uses bounded pages, does not replay context into 
     const calls = f.calls.length; expect((await f.service.act(repo, { action: "frames", cursor: loaded.token, members: [sha(2)] })).error?.code).toBe("HISTORY_CONTEXT_DRIFT"); expect(f.calls).toHaveLength(calls);
     f.deps.store = { ...f.deps.store, page: async (...a) => { const p = await original.page(...a); return { ...p, nextOffset: 7 }; } };
     expect((await f.service.act(repo, { action: "frames", cursor: loaded.token, members: [sha(2)] })).error?.code).toBe("HISTORY_CONTEXT_INVALID");
+  } finally { f.db.close(); }
+});
+
+function deferred() {
+  let enter!: () => void, release!: () => void;
+  const waiting = new Promise<void>(r => { enter = r; }), gate = new Promise<void>(r => { release = r; });
+  return { enter, release, waiting, gate };
+}
+
+test("SYNTHETIC capture changes/miss/cache error during append or signing preserve accepted old-anchor counts and suppress publication", async () => {
+  for (const boundary of ["append", "signing"] as const) for (const change of ["capture", "miss", "error"] as const) {
+    const f = await fixture({ head: 4 }), pending = deferred();
+    try {
+      const initial = await f.service.read(repo), oldIdentity = structuredClone(initial.capture.identity), original = f.deps.store, signer = f.deps.cursor;
+      if (boundary === "append") f.deps.store = { page: (...a) => original.page(...a), frame: (...a) => original.frame(...a), append: async batch => { pending.enter(); await pending.gate; return original.append(batch); } };
+      else f.deps.cursor = { verify: (token: unknown) => signer.verify(token), issue: async (claim: HistoryCursorClaim) => { pending.enter(); await pending.gate; return signer.issue(claim); } } as unknown as HistoryCursorCodec;
+      const action = f.service.act(repo, { action: "walk", cursor: initial.token }); await pending.waiting;
+      const calls = f.calls.length;
+      expect((await new HistoryService(f.deps).act(repo, { action: "walk", cursor: initial.token })).error?.code).toBe("HISTORY_BUSY"); expect(f.calls).toHaveLength(calls);
+      if (change === "capture") f.world = { ...f.world!, collectedAt: "2026-11-04T17:00:00Z" };
+      if (change === "miss") f.world = null;
+      if (change === "error") f.failCache();
+      pending.release(); const result = await action;
+      expect(result).toMatchObject({ status: "partially-saved", token: null, capture: { identity: oldIdentity }, persisted: { commits: 4, frames: 0, batches: 1, cursor: { revision: 1, retainedCommits: 4, reachedRoot: true } }, error: { code: change === "capture" ? "HISTORY_CAPTURE_CHANGED" : change === "miss" ? "HISTORY_CACHE_MISSING" : "HISTORY_CACHE_UNAVAILABLE" } });
+      expect(result.observed?.commits).toHaveLength(4); expect(result.observed?.persistence).toBe("not-persisted");
+      const old = await f.store.page(initial.capture.anchor); expect(old.commits).toHaveLength(4); expect(old.cursor).toEqual(result.persisted.cursor!);
+      expect(f.db.query("SELECT generation FROM history_anchors").all()).toEqual([{ generation: initial.capture.anchor.generation }]);
+      const receipt = JSON.parse((f.db.query("SELECT payload FROM history_batches").get() as { payload: string }).payload);
+      expect(receipt.acceptedCursor).toEqual(old.cursor); expect(receipt.anchorKey).toBe(JSON.stringify([initial.capture.anchor.sha, initial.capture.anchor.generation]));
+      expect(f.request).toBe(3); expect(f.collection).toBe(1); expect(f.calls).toHaveLength(5);
+    } finally { pending.release(); f.db.close(); }
+  }
+});
+
+test("SYNTHETIC read signing publication guard rejects late capture/miss/error without collection or writes", async () => {
+  for (const change of ["capture", "miss", "error"] as const) {
+    const f = await fixture({ head: 4 }), pending = deferred();
+    try {
+      const signer = f.deps.cursor, before = f.dump();
+      f.deps.cursor = { verify: (token: unknown) => signer.verify(token), issue: async (claim: HistoryCursorClaim) => { pending.enter(); await pending.gate; return signer.issue(claim); } } as unknown as HistoryCursorCodec;
+      const read = f.service.read(repo), outcome = read.then(value => ({ value, error: null }), error => ({ value: null, error }));
+      await pending.waiting;
+      if (change === "capture") f.world = { ...f.world!, collectedAt: "2026-11-04T17:00:00Z" };
+      if (change === "miss") f.world = null;
+      if (change === "error") f.failCache();
+      pending.release(); const result = await outcome;
+      expect(result.value).toBeNull(); expect(result.error).toMatchObject({ code: change === "capture" ? "HISTORY_CAPTURE_CHANGED" : change === "miss" ? "HISTORY_CACHE_MISSING" : "HISTORY_CACHE_UNAVAILABLE" });
+      expect(f.dump()).toBe(before); expect(f.request).toBe(1); expect(f.collection).toBe(0); expect(f.taken).toBe(0); expect(f.calls).toHaveLength(0);
+    } finally { pending.release(); f.db.close(); }
+  }
+});
+
+test("SYNTHETIC signing failure or superseded zero-unit action reports confirmed acceptance accurately", async () => {
+  for (const accepted of [true, false]) for (const failure of ["signature", "capture"] as const) {
+    const f = await fixture({ head: 4 }), pending = deferred();
+    try {
+      const initial = await f.service.read(repo), signer = f.deps.cursor, before = f.dump();
+      if (!accepted) f.deps.reader.limits = { commitSteps: 0 };
+      f.deps.cursor = { verify: (token: unknown) => signer.verify(token), issue: async (claim: HistoryCursorClaim) => { pending.enter(); await pending.gate; if (failure === "signature") throw new Error("SYNTHETIC signing failure"); return signer.issue(claim); } } as unknown as HistoryCursorCodec;
+      const action = f.service.act(repo, { action: "walk", cursor: initial.token }); await pending.waiting;
+      if (failure === "capture") f.world = { ...f.world!, collectedAt: "2026-11-04T17:00:00Z" };
+      pending.release(); const result = await action;
+      expect(result.status).toBe(accepted ? "partially-saved" : "not-saved"); expect(result.persisted).toMatchObject({ commits: accepted ? 4 : 0, frames: 0, batches: accepted ? 1 : 0 }); expect(result.token).toBeNull();
+      expect(result.error?.code).toBe(failure === "capture" ? "HISTORY_CAPTURE_CHANGED" : "HISTORY_UNAVAILABLE");
+      if (!accepted) expect(f.dump()).toBe(before);
+      else expect((await f.store.page(initial.capture.anchor)).cursor).toEqual(result.persisted.cursor!);
+    } finally { pending.release(); f.db.close(); }
+  }
+});
+
+test("SYNTHETIC authority remains held through post-append validation and final signing settlement", async () => {
+  const f = await fixture({ head: 4 }), pending = deferred();
+  try {
+    const initial = await f.service.read(repo), original = f.deps.store, cache = f.deps.cache; let committed = false, once = true;
+    f.deps.store = { page: (...a) => original.page(...a), frame: (...a) => original.frame(...a), append: async batch => { const saved = await original.append(batch); committed = true; return saved; } };
+    f.deps.cache = { get: async (...a) => { if (committed && once) { once = false; pending.enter(); await pending.gate; } return cache.get(...a); } };
+    const action = f.service.act(repo, { action: "walk", cursor: initial.token }); await pending.waiting;
+    expect((await f.store.page(initial.capture.anchor)).commits).toHaveLength(4);
+    expect((await f.service.act(repo, { action: "walk", cursor: initial.token })).error?.code).toBe("HISTORY_BUSY");
+    pending.release(); expect((await action).status).toBe("saved"); expect(f.request).toBe(3); expect(f.collection).toBe(1);
+  } finally { pending.release(); f.db.close(); }
+});
+
+test("SYNTHETIC superseded accepted frame reports frame counts independently and preserves the prior commit receipt", async () => {
+  const f = await fixture({ head: 1 }), pending = deferred();
+  try {
+    const initial = await f.service.read(repo), saved = await f.service.act(repo, { action: "walk", cursor: initial.token }), original = f.deps.store;
+    const commitReceipt = f.db.query("SELECT payload FROM history_batches").get();
+    f.deps.store = { page: (...a) => original.page(...a), frame: (...a) => original.frame(...a), append: async batch => { pending.enter(); await pending.gate; return original.append(batch); } };
+    const action = f.service.act(repo, { action: "frames", cursor: saved.token, members: [sha(1)] }); await pending.waiting;
+    f.world = { ...f.world!, collectedAt: "2026-11-04T17:00:00Z" }; pending.release(); const result = await action;
+    expect(result).toMatchObject({ status: "partially-saved", token: null, capture: initial.capture, persisted: { commits: 0, frames: 1, batches: 1, cursor: { revision: 2, retainedCommits: 1 } }, error: { code: "HISTORY_CAPTURE_CHANGED" } });
+    expect(f.db.query("SELECT payload FROM history_batches ORDER BY rowid LIMIT 1").get()).toEqual(commitReceipt);
+    const retained = await f.store.page(initial.capture.anchor); expect(retained.retention).toMatchObject({ commits: 1, frames: 1, receipts: 2 }); expect(retained.cursor).toEqual(result.persisted.cursor!);
+    expect(f.request).toBe(3); expect(f.collection).toBe(2);
+  } finally { pending.release(); f.db.close(); }
+});
+
+test("SYNTHETIC cache-only signing failure returns no response/token and performs no mutation or collection", async () => {
+  const f = await fixture();
+  try {
+    const signer = f.deps.cursor, before = f.dump();
+    f.deps.cursor = { verify: (token: unknown) => signer.verify(token), issue: async () => { throw new Error("SYNTHETIC signing unavailable"); } } as unknown as HistoryCursorCodec;
+    await expect(f.service.read(repo)).rejects.toMatchObject({ code: "HISTORY_UNAVAILABLE", status: 503 });
+    expect(f.dump()).toBe(before); expect(f.request).toBe(1); expect(f.collection).toBe(0); expect(f.calls).toHaveLength(0);
   } finally { f.db.close(); }
 });
