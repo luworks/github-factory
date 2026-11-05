@@ -5,6 +5,8 @@ export type Awaitable<T> = T | Promise<T>;
 export interface CachedWorld { world: WorldSnapshot; expiresAt: number; fresh: boolean }
 export interface WorldSummary { key: string; repo: RepoIdentity; collectedAt: string; expiresAt: number; ready: boolean }
 export interface WorldStorageStatus { backend: "sqlite" | "d1"; authoritative: true; schemaVersion: number; databaseId?: string; worlds: number; aliases: number }
+/** Local promise settlement only; not remote cancellation or retirement proof. */
+export interface WorldStoragePhysicalObservation { readonly idle: boolean; readonly settled: Promise<void> }
 /** Opaque server-only collection lifetime, minted BEFORE calling the public
  * collector. Implementations authenticate object identity; fields are not proof
  * supplied by a browser, timestamps, or a cached WorldSnapshot. */
@@ -29,6 +31,7 @@ export interface SnapshotStore {
   delete?(repo: string): Awaitable<void>;
   status?(): Awaitable<WorldStorageStatus>;
   readonly publicCaptures?: PublicCaptureAuthority;
+  readonly observeSettlement?: () => WorldStoragePhysicalObservation;
 }
 export class WorldStorageError extends Error {
   readonly status = 503;

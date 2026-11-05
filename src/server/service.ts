@@ -6,6 +6,7 @@ import { getWorldResources } from "./world-resources";
 import { isRenderableWorld } from "./world-readiness";
 import { WorldStorageError, type CachedWorld, type SnapshotStore, type WorldStorageStatus, type PublicCaptureGeneration } from "./world-storage";
 import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
+import { createWorldLifecycle } from "./world-lifecycle";
 
 interface Collector {
   collect(ref: RepoRef, context?: CollectionObservation): Promise<RepoCollection>;
@@ -14,10 +15,13 @@ interface Collector {
 /** Injectable service factory keeps tests deterministic and prevents all network access on import. */
 export function createWorldService(options: { collector: Collector; store: SnapshotStore; now?: () => number; maxConcurrent?: number }) {
   const now = options.now || Date.now;
+  // One original store owns reads, writes and the bound lifetime observation.
+  const store = options.store;
   const inflight = new Map<string, Promise<WorldSnapshot>>();
   const cooldown = new Map<string, { until: number; error: GitHubError }>();
   let active = 0;
   const maxConcurrent = Math.max(1, Math.min(3, options.maxConcurrent ?? 2));
+  const lifecycle = createWorldLifecycle(store);
   const stale = (world: WorldSnapshot, error: GitHubError): WorldSnapshot => ({
     ...world,
     health: { ...world.health, github: "error" },
@@ -51,20 +55,20 @@ export function createWorldService(options: { collector: Collector; store: Snaps
   };
   const getCachedWorld = async (input: string): Promise<WorldSnapshot | null> => {
     const ref = parseRepo(input);
-    return cachedSnapshot(await options.store.get(ref.fullName, now(), { readOnly: true }));
+    return cachedSnapshot(await store.get(ref.fullName, now(), { readOnly: true }));
   };
   const loadWorld = async (input: string, settings?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
     const ref = parseRepo(input),
       key = ref.fullName.toLowerCase();
-    const cached = await options.store.get(key, now());
-    const authority = options.store.publicCaptures;
+    const cached = await store.get(key, now());
+    const authority = store.publicCaptures;
     if (authority && ["begin", "assert", "commit", "revoke"].some(method => typeof authority[method as keyof typeof authority] !== "function")) throw new WorldStorageError();
     const fallback = async (error: GitHubError, generation?: PublicCaptureGeneration) => {
       if (!cached) throw error;
       if (authority && generation) await authority.assert(generation);
       // Cached variables predate asynchronous work. Re-read the authority so a
       // concurrent revocation cannot turn a network/admission error into a leak.
-      const current = await options.store.get(key, now(), { readOnly: true });
+      const current = await store.get(key, now(), { readOnly: true });
       if (!current) throw new WorldStorageError();
       return stale(current.world, error);
     };
@@ -74,6 +78,9 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     if (inflight.has(key)) return inflight.get(key)!;
     // Forced refresh cannot turn one browser into an unbounded GitHub request loop.
     if (cached && settings?.refresh && now() - Date.parse(cached.world.collectedAt) < 15_000) return cached.world;
+    // A late provider mutation cannot route a newly present observer through
+    // the legacy path captured by this factory. Recompose behind a real handoff.
+    if (!lifecycle && "observeSettlement" in store) throw new WorldStorageError();
     requireAnalysisOpen();
     const failure = cooldown.get(key);
     if (failure && failure.until > now()) {
@@ -90,7 +97,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     let publish!: (world: WorldSnapshot) => void, fail!: (error: unknown) => void;
     const promise = new Promise<WorldSnapshot>((resolve, reject) => { publish = resolve; fail = reject; });
     inflight.set(key, promise);
-    const work = (async () => {
+    const collect = async () => {
       let generation: PublicCaptureGeneration | undefined, collectionContext: CollectionObservation | undefined, admitted = false;
       try {
         requireAnalysisOpen();
@@ -109,8 +116,8 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         world.refreshAfter = expiresAt;
         if (authority) await authority.commit(generation!, world, 90_000, now());
         else { // Legacy injectable adapters; D1 privacy is NOT advertised ready.
-          await options.store.put(world, 90_000, now());
-          await options.store.alias?.(key, world.repo.fullName);
+          await store.put(world, 90_000, now());
+          await store.alias?.(key, world.repo.fullName);
         }
         cooldown.set(key, {
           until: now() + 15_000,
@@ -124,27 +131,31 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         cooldown.set(key, { until: now() + Math.max(15, Math.min(3600, typed.retryAfter || 15)) * 1000, error: typed });
         if (typed.code === "PUBLIC_ONLY" && typed.status === 403) {
           if (authority) await authority.revoke(key, generation, generation ? takePrivateRepositoryObservation(error, collectionContext, key, generation) : undefined);
-          else await options.store.delete?.(key);
+          else await store.delete?.(key);
           throw typed;
         }
         if (cached) return await fallback(typed, generation);
         throw typed;
       } finally {
-        active--;
-        inflight.delete(key);
-        if (cooldown.size > 200) {
-          for (const [id, value] of cooldown) if (value.until <= now()) cooldown.delete(id);
-          if (cooldown.size > 200) cooldown.delete(cooldown.keys().next().value!);
-        }
+        if (!lifecycle) releaseSlot();
       }
-    })();
+    };
+    const releaseSlot = () => {
+      active--;
+      inflight.delete(key);
+      if (cooldown.size > 200) {
+        for (const [id, value] of cooldown) if (value.until <= now()) cooldown.delete(id);
+        if (cooldown.size > 200) cooldown.delete(cooldown.keys().next().value!);
+      }
+    };
+    const work = lifecycle ? lifecycle.run(collect, releaseSlot) : collect();
     void work.then(publish, fail);
     return promise;
   };
   const listFeatured = async (): Promise<FeaturedProject[]> => {
     const keys = CURATED_PROJECTS.map((project) => project.fullName.toLowerCase());
-    const summaries = options.store.summaries ? await options.store.summaries(keys, now()) :
-      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now(), { readOnly: true }); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
+    const summaries = store.summaries ? await store.summaries(keys, now()) :
+      (await Promise.all(keys.map(async (key) => { const entry = await store.get(key, now(), { readOnly: true }); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
     const byKey = new Map(summaries.map((row) => [row.key, row]));
     return CURATED_PROJECTS.map((project) => {
       const cached = byKey.get(project.fullName.toLowerCase());
@@ -160,7 +171,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         : { ...project };
     });
   };
-  const storageStatus = async (): Promise<WorldStorageStatus | { backend: "injected" }> => options.store.status ? options.store.status() : { backend: "injected" };
+  const storageStatus = async (): Promise<WorldStorageStatus | { backend: "injected" }> => store.status ? store.status() : { backend: "injected" };
   return { loadWorld, listFeatured, getCachedWorld, storageStatus, activeCollections: () => active };
 }
 let singleton: ReturnType<typeof createWorldService> | undefined;
