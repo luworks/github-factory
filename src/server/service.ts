@@ -174,23 +174,22 @@ export function createWorldService(options: { collector: Collector; store: Snaps
   const storageStatus = async (): Promise<WorldStorageStatus | { backend: "injected" }> => store.status ? store.status() : { backend: "injected" };
   return { loadWorld, listFeatured, getCachedWorld, storageStatus, activeCollections: () => active };
 }
-let singleton: ReturnType<typeof createWorldService> | undefined;
+let singleton: Promise<ReturnType<typeof createWorldService>> | undefined;
 function service() {
-  if (!singleton) {
-    const resources = getWorldResources();
-    singleton = createWorldService({ collector: resources.collector, store: resources.store });
-  }
-  return singleton;
+  return singleton ??= getWorldResources().then(resources => createWorldService({ collector: resources.collector, store: resources.store }));
 }
 /** Public GitHub facts only. refreshAfter is an absolute epoch-millisecond cache expiry.
  * refresh bypasses the 90s TTL after a 15s minimum interval; no AI module is imported.
  * Rejects with GitHubError { status, code, message, retryAfter? } without cached evidence.
  * Failed refreshes retain the original capture timestamp and mark the snapshot STALE. */
-export const loadWorld = (input: string, options?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => service().loadWorld(input, options);
+export const loadWorld = async (input: string, options?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => (await service()).loadWorld(input, options);
 /** Curated catalog + persisted facts only; ready means a real cached snapshot exists. */
-export const listFeatured = (): Promise<FeaturedProject[]> => service().listFeatured();
+export const listFeatured = async (): Promise<FeaturedProject[]> => (await service()).listFeatured();
 /** Cache-only read: no GitHub or paid requests; null on a miss, STALE note on expiry.
  * This reads the backend snapshot, whose blueprint is rules-generated. Parent integration
  * overlays its independently cached successful AI blueprint for the exact repository/head. */
-export const getCachedWorld = (input: string): Promise<WorldSnapshot | null> => service().getCachedWorld(input);
-export const getWorldStorageState = async () => ({ ...(await service().storageStatus()), writesHeld: migrationHeld(), activeCollections: service().activeCollections(), activePublicAnalyses: activePublicAnalyses() });
+export const getCachedWorld = async (input: string): Promise<WorldSnapshot | null> => (await service()).getCachedWorld(input);
+export const getWorldStorageState = async () => {
+  const current = await service();
+  return { ...(await current.storageStatus()), writesHeld: migrationHeld(), activeCollections: current.activeCollections(), activePublicAnalyses: activePublicAnalyses() };
+};

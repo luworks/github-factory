@@ -2,6 +2,32 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { HISTORY_RPC_URL } from "./history-rpc-contract";
 import type { HistoryRpcStoreConfig } from "./d1-history-store";
+import { WORLD_CAPTURE_RPC_URL } from "./world-capture-rpc-contract";
+
+export interface WorldCaptureConfig {
+  readonly schemaVersion: 4;
+  readonly endpoint: string;
+  readonly secret: string;
+  readonly identity: Readonly<{ databaseId: string; bindingNonce: string; epoch: string }>;
+  readonly keyHex: string;
+}
+
+/** Pure, server-owned opt-in. Disabled settings never expose a capture key.
+ * The epoch and independent key must come from the pinned operator authority;
+ * parsing does not create, rotate, derive or certify either of them. */
+export function worldCaptureConfig(env: Record<string, string>): WorldCaptureConfig | null {
+  const enabled = env.MOONSHOT_WORLD_CAPTURE_ENABLED;
+  if (enabled === undefined || enabled === "" || enabled === "false") return null;
+  const reject = (): never => { throw new Error("Invalid world capture configuration"); };
+  if (enabled !== "true" || env.MOONSHOT_WORLD_STORE !== "d1" || env.MOONSHOT_WORLD_CAPTURE_SCHEMA_VERSION !== "4" || env.MOONSHOT_D1_STORAGE_URL !== WORLD_CAPTURE_RPC_URL) return reject();
+  const secret = env.MOONSHOT_D1_STORAGE_SECRET || "", keyHex = env.MOONSHOT_WORLD_CAPTURE_KEY_HEX || "";
+  const identity = { databaseId: env.MOONSHOT_D1_DATABASE_ID || "", bindingNonce: env.MOONSHOT_WORLD_CAPTURE_BINDING_NONCE || "", epoch: env.MOONSHOT_WORLD_CAPTURE_EPOCH || "" };
+  const bytes = new TextEncoder().encode(secret).length;
+  if (secret.length < 32 || bytes > 256 || !/^[a-f0-9]{64}$/.test(keyHex) ||
+      !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(identity.databaseId) ||
+      !/^[a-f0-9]{32}$/.test(identity.bindingNonce) || !/^[a-f0-9]{32}$/.test(identity.epoch)) return reject();
+  return Object.freeze({ schemaVersion: 4, endpoint: WORLD_CAPTURE_RPC_URL, secret, identity: Object.freeze(identity), keyHex });
+}
 
 export interface HistoryRuntimeConfig {
   readonly publicOrigin: string;
@@ -44,6 +70,7 @@ export function projectEnv(): Record<string, string> {
 }
 
 export function getConfig(env: Record<string, string> = projectEnv()) {
+  const worldCapture = worldCaptureConfig(env);
   if (env.MOONSHOT_WORLD_STORE && !["sqlite", "d1"].includes(env.MOONSHOT_WORLD_STORE)) throw new Error("Invalid world storage configuration");
   const publicRuntime = Boolean(env.MOONSHOT_PUBLIC_ORIGIN);
   const budgetUsd = Math.max(0, Math.min(50, Number(env.MOONSHOT_BUDGET_USD || 0) || 0));
@@ -66,6 +93,7 @@ export function getConfig(env: Record<string, string> = projectEnv()) {
     d1StorageUrl: env.MOONSHOT_D1_STORAGE_URL || "",
     d1StorageSecret: env.MOONSHOT_D1_STORAGE_SECRET || "",
     d1DatabaseId: env.MOONSHOT_D1_DATABASE_ID || "",
+    worldCapture,
     // An explicit existing file is required; BudgetLedger never initializes a
     // new file at this path, so migration cannot silently fork paid history.
     ledgerPath: env.MOONSHOT_BUDGET_LEDGER_PATH || undefined,
