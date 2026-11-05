@@ -267,4 +267,32 @@ if (process.env.CAPTURE_WORLD_CLIENT_CHILD !== "1") {
       crypto.subtle.sign = original; gate.resolve(); await client.observeSettlement().settled; expect(client.observeSettlement().idle).toBe(true); expect(f.calls.length).toBe(before);
     } finally { crypto.subtle.sign = original; gate.resolve(); p?.close(); await client.observeSettlement().settled; f.close(); }
   });
+
+  test("CHILD final local get projection rechecks normal/deadline/backwards/nonfinite clocks before publication", async () => {
+    const f = await fixture();
+    try {
+      await f.client.put(world(), 90000, now); const response = await f.network(WORLD_CAPTURE_RPC_URL, { method: "POST", redirect: "error", headers: { "content-type": "application/json", "x-factory-storage-key": f.config.secret }, body: JSON.stringify({ op: "getMany", keys: [canonical] }) }); const text = await response.text(), raw = JSON.parse(text).result[0].snapshot;
+      for (const mode of ["normal", "deadline", "backwards", "nonfinite"] as const) {
+        let clock = 100, parses = 0; const original = JSON.parse, client = new D1CaptureWorldStore(f.config, async () => new Response(text, { headers: { "content-type": "application/json" } }), {}, () => clock);
+        try {
+          JSON.parse = ((...args: Parameters<typeof JSON.parse>) => { const result = original(...args); if (args[0] === raw && ++parses === 2) clock = mode === "deadline" ? 10100 : mode === "backwards" ? 99 : mode === "nonfinite" ? NaN : 100; return result; }) as typeof JSON.parse;
+          if (mode === "normal") expect((await client.get(canonical, now))?.world.repo.fullName).toBe(source);
+          else await expect(client.get(canonical, now)).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE", writeOutcome: "not-started" });
+          expect(parses).toBe(2);
+        } finally { JSON.parse = original; await client.observeSettlement().settled; expect(client.observeSettlement().idle).toBe(true); }
+      }
+    } finally { f.close(); }
+  });
+
+  test("CHILD final token projection deadline after a dispatched begin remains UNKNOWN and physically settled", async () => {
+    const f = await fixture(); let clock = 100;
+    const original = Object.freeze;
+    try {
+      const response = await f.network(WORLD_CAPTURE_RPC_URL, { method: "POST", redirect: "error", headers: { "content-type": "application/json", "x-factory-storage-key": f.config.secret }, body: JSON.stringify({ op: "captureBegin", repo: input, explicitRevalidation: true }) }); const text = await response.text(), handle = JSON.parse(text).result.handle;
+      const client = new D1CaptureWorldStore(f.config, async () => new Response(text, { headers: { "content-type": "application/json" } }), {}, () => clock);
+      try { Object.freeze = ((value: any) => { const result = original(value); if (value?.handle === handle) clock = 10100; return result; }) as typeof Object.freeze; await expect(client.publicCaptures.begin(input, explicit)).rejects.toMatchObject({ code: "WORLD_STORAGE_UNAVAILABLE", writeOutcome: "unknown", barrier: null }); }
+      finally { Object.freeze = original; await client.observeSettlement().settled; expect(client.observeSettlement().idle).toBe(true); }
+      expect(f.a.db.query("SELECT count(*) n FROM world_capture_generations WHERE status='active'").get()).toEqual({ n: 1 });
+    } finally { Object.freeze = original; f.close(); }
+  });
 }

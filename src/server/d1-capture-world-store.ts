@@ -68,7 +68,10 @@ export class D1CaptureWorldStore implements SnapshotStore {
       // stays observed after a response deadline, alongside transport promises.
       c.pending.add(execution); execution.then(() => { c.pending.delete(execution); this.#release(c); }, () => { c.pending.delete(execution); this.#release(c); });
       const timeout = new Promise<never>((_, fail) => { timer = setTimeout(() => { c.expired = true; fail(new Error("World operation deadline.")); }, this.#limits.timeoutMs); });
-      return await Promise.race([execution, timeout]);
+      const result = await Promise.race([execution, timeout]);
+      // Include every final local projection, even synchronous work that can
+      // cross the deadline before a timer callback gets a chance to run.
+      this.#check(c); return result;
     }
     catch (e) { if (c.outcomeError && e === c.outcomeError) throw e; throw new D1CaptureWorldStoreError(c.dispatchedWrite ? "unknown" : "not-started"); }
     finally { clearTimeout(timer); c.finished = true; this.#release(c); }
