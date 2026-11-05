@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import type { WorldSnapshot } from "../contracts";
 import { parseRepo } from "./github";
 import { isRenderableWorld } from "./world-readiness";
-import type { CachedWorld, WorldSummary, WorldStorageStatus } from "./world-storage";
+import { WorldStorageError, type CachedWorld, type WorldSummary, type WorldStorageStatus } from "./world-storage";
 export type { CachedWorld } from "./world-storage";
 
 /** Independent SQLite file; a complete snapshot is replaced atomically in a single statement. */
@@ -18,7 +18,7 @@ export class WorldStore {
     );
     this.db.exec("CREATE TABLE IF NOT EXISTS world_aliases (alias TEXT PRIMARY KEY, canonical TEXT NOT NULL)");
   }
-  get(repo: string, now = Date.now()): CachedWorld | null {
+  get(repo: string, now = Date.now(), options?: { readOnly?: boolean }): CachedWorld | null {
     const key = repo.toLowerCase();
     const alias = this.db.query("SELECT canonical FROM world_aliases WHERE alias = ?").get(key) as { canonical: string } | null;
     const canonical = alias?.canonical || key;
@@ -40,6 +40,7 @@ export class WorldStore {
         throw new Error("Invalid cached snapshot");
       return { world, expiresAt: row.expires_at, fresh: row.expires_at > now };
     } catch {
+      if (options?.readOnly) throw new WorldStorageError();
       this.delete(repo);
       return null;
     }

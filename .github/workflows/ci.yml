@@ -1,7 +1,7 @@
 name: CI
 on:
   push:
-    branches: [main]
+    branches: [main, feature/atlas-cached-exploration]
   pull_request:
 permissions:
   contents: read
@@ -14,6 +14,7 @@ jobs:
     timeout-minutes: 15
     env:
       MOONSHOT_BUDGET_USD: "0"
+      MOONSHOT_OFFLINE_FIXTURE: "1"
       MOONSHOT_BASE_PATH: /github-factory/
     steps:
       - uses: actions/checkout@v4
@@ -28,7 +29,7 @@ jobs:
       - name: Verify prefixed production app in Chromium
         shell: bash
         run: |
-          HOST=127.0.0.1 PORT=4177 bun run start > /tmp/github-factory.log 2>&1 &
+          HOST=127.0.0.1 PORT=4177 bun --no-env-file --preload ./test/fixtures/offline-runtime.ts .output/server/index.mjs > /tmp/github-factory.log 2>&1 &
           app_pid=$!
           trap 'kill "$app_pid" 2>/dev/null || true' EXIT
           for attempt in {1..30}; do

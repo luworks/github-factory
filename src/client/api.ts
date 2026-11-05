@@ -8,15 +8,15 @@ export async function request<T>(url: string, options?: RequestInit): Promise<T>
   } catch {
     throw new Error("The server returned an unreadable response. Please try again.");
   }
-  if (!r.ok) throw new Error((result as { error?: string })?.error || `Request failed (${r.status}).`);
+  if (!r.ok) throw Object.assign(new Error((result as { error?: string })?.error || `Request failed (${r.status}).`), { status:r.status, code:(result as {code?:string})?.code });
   return result as T;
 }
 export const getGallery = () => request<{ projects: FeaturedProject[] }>("/api/gallery");
 export const createWorld = (repo: string) =>
   request<WorldSnapshot>("/api/worlds", { method: "POST", body: JSON.stringify({ repo, enrich: false }) });
 const pendingWorlds = new Map<string, Promise<WorldSnapshot>>();
-export function getWorld(owner: string, repo: string): Promise<WorldSnapshot> {
-  const url = `/api/world/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`;
+function worldRequest(owner: string, repo: string, cached: boolean): Promise<WorldSnapshot> {
+  const url = `/api/world/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}${cached ? "?mode=cached" : ""}`;
   const pending = pendingWorlds.get(url);
   if (pending) return pending;
   const requestWorld = request<WorldSnapshot>(url);
@@ -27,6 +27,8 @@ export function getWorld(owner: string, repo: string): Promise<WorldSnapshot> {
   void requestWorld.then(clear, clear);
   return requestWorld;
 }
+export const getWorld = (owner:string,repo:string) => worldRequest(owner,repo,false);
+export const getCachedWorld = (owner:string,repo:string) => worldRequest(owner,repo,true);
 export const refreshWorld = (owner: string, repo: string) =>
   request<WorldSnapshot>(`/api/world/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
     method: "POST",

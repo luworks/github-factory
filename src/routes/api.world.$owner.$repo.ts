@@ -5,6 +5,14 @@ export const Route = createFileRoute("/api/world/$owner/$repo")({
       GET: async ({ params, request }) => {
         const { json, apiError } = await import("../server/http");
         try {
+          const { worldReadMode, readCachedWorld } = await import("../server/cached-world");
+          const mode = worldReadMode(request.url);
+          if (mode === "cached") {
+            const { clientIdentity, accessConfig } = await import("../server/access");
+            clientIdentity(request, accessConfig());
+            const { getCachedWorld } = await import("../server/service");
+            return json(await readCachedWorld(`${params.owner}/${params.repo}`, getCachedWorld));
+          }
           const { accessRequest } = await import("../server/access");
           const access = accessRequest(request);
           const { loadWorld } = await import("../server/service");

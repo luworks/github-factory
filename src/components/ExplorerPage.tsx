@@ -1,5 +1,5 @@
 import { appPath } from "../base-path";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -35,7 +35,7 @@ import {
 import type { BudgetStatus, StyleId, WorldNode, WorldSnapshot } from "../contracts";
 import { WorldCanvas } from "../world/WorldCanvas";
 import { STYLES } from "../client/demo";
-import { clock, enrichWorld, getBudget, getWorld, refreshWorld, shortNumber } from "../client/api";
+import { clock, enrichWorld, getBudget, getCachedWorld, getWorld, refreshWorld, shortNumber } from "../client/api";
 import { Brand, External } from "./shared";
 /** Keep source text intact while offering natural identifier wrapping points. */
 function identifierBreaks(value: string) {
@@ -62,10 +62,14 @@ function ciSummary(w: WorldSnapshot) {
 export function ExplorerPage({
   owner,
   repo,
+  readMode = "legacy",
 }: {
   owner: string;
   repo: string;
+  readMode?: "legacy" | "cached" | "invalid";
 }) {
+  const loadGeneration = useRef(0);
+  const cachedOnly = readMode === "cached";
   const [world, setWorld] = useState<WorldSnapshot | null>(null),
     [error, setError] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false),
@@ -83,41 +87,39 @@ export function ExplorerPage({
   }, []);
   const load = useCallback(
     async (refresh = false) => {
+      const generation = ++loadGeneration.current;
       if (refresh) setRefreshing(true);
       try {
-        const next = await (refresh ? refreshWorld(owner, repo) : getWorld(owner, repo));
+        if (readMode === "invalid") throw new Error("Invalid exploration mode. Return to Atlas to choose a cached world.");
+        const next = await (cachedOnly ? getCachedWorld(owner, repo) : refresh ? refreshWorld(owner, repo) : getWorld(owner, repo));
+        if (generation !== loadGeneration.current) return;
         setWorld(next);
         setError(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "The repository could not be loaded.");
+        if (generation === loadGeneration.current) setError(e instanceof Error ? e.message : "The repository could not be loaded.");
       } finally {
-        setRefreshing(false);
+        if (generation === loadGeneration.current) setRefreshing(false);
       }
     },
-    [owner, repo],
+    [owner, repo, readMode, cachedOnly],
   );
   useEffect(() => {
     let active = true;
-    getWorld(owner, repo)
-      .then((w) => {
-        if (active) setWorld(w);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      });
-    getBudget()
+    void load();
+    if (!cachedOnly && readMode !== "invalid")     getBudget()
       .then((b) => {
         if (active) setBudget(b);
       })
       .catch(() => {});
-    const timer = setInterval(() => {
+    const timer = readMode === "legacy" ? setInterval(() => {
       if (active && document.visibilityState === "visible") void load();
-    }, 60000);
+    }, 60000) : undefined;
     return () => {
       active = false;
-      clearInterval(timer);
+      ++loadGeneration.current;
+      if (timer) clearInterval(timer);
     };
-  }, [owner, repo, load]);
+  }, [owner, repo, load, cachedOnly, readMode]);
   const changeStyle = (s: StyleId) => {
     setStyle(s);
     const url = new URL(window.location.href);
@@ -149,7 +151,9 @@ export function ExplorerPage({
     stale = world ? Date.now() > world.refreshAfter : false;
   const share = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const shareUrl = new URL(window.location.href);
+      shareUrl.searchParams.delete("atlasReturn"); shareUrl.searchParams.delete("from");
+      await navigator.clipboard.writeText(shareUrl.href);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {

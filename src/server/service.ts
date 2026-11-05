@@ -55,7 +55,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
   };
   const getCachedWorld = async (input: string): Promise<WorldSnapshot | null> => {
     const ref = parseRepo(input);
-    return cachedSnapshot(await options.store.get(ref.fullName, now()));
+    return cachedSnapshot(await options.store.get(ref.fullName, now(), { readOnly: true }));
   };
   const loadWorld = async (input: string, settings?: { refresh?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
     const ref = parseRepo(input),
@@ -145,8 +145,13 @@ let singleton: ReturnType<typeof createWorldService> | undefined;
 function service() {
   if (!singleton) {
     const config = getConfig();
+    let collector: GitHubClient | undefined;
     singleton = createWorldService({
-      collector: new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch)),
+      // Cache reads must not initialize or consume the upstream quota store.
+      collector: { collect: (ref) => {
+        const client = collector ??= new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch));
+        return client.collect(ref);
+      } },
       store: config.worldStore === "d1" ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret, databaseId: config.d1DatabaseId }) : new WorldStore(worldStorePath(config.dataDir)),
     });
   }
