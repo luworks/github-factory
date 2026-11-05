@@ -105,6 +105,13 @@ test("SYNTHETIC actual wrapper multi-read response cap fails honestly without dr
   try { for (let i = 0; i < 5; i++) await f.core.putLegacy(write(`synthetic/large-${i}`, 1000, "x".repeat(450000))); const before = f.dump(); const response = await f.rpc({ op: "getMany", keys: Array.from({ length: 5 }, (_, i) => `synthetic/large-${i}`) }); expect(response.status).toBe(503); expect(response.body.code).toBe("WORLD_RPC_RESPONSE_TOO_LARGE"); expect(response.body.result).toBeUndefined(); expect(f.dump()).toBe(before); } finally { f.close(); }
 });
 
+test("SYNTHETIC duplicate/nonfinite JSON in an existing raw cache snapshot is unavailable without read repair", async () => {
+  for (const prefix of ['"source":"fixture",', '"unused":1e999,']) {
+    const f = await fixture();
+    try { const w = write(); w.snapshot = "{" + prefix + w.snapshot.slice(1); await f.core.putLegacy(w); const before = f.dump(); for (const op of ["getMany", "summaries"]) { const response = await f.rpc({ op, keys: [canonical] }); expect(response.status).toBe(503); expect(response.body.writeOutcome).toBe("not-started"); expect(f.dump()).toBe(before); } } finally { f.close(); }
+  }
+});
+
 test("SYNTHETIC actual RPC cross-instance generation one-use, tampering, signed canonical privacy group and cleanup uncertainty", async () => {
   const f = await fixture();
   try {

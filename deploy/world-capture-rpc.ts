@@ -4,6 +4,7 @@ import { assertStorageSchema4 } from "./storage-schema4";
 import { WORLD_CAPTURE_RPC_LIMITS as L, WORLD_CAPTURE_RPC_URL, WorldCaptureRpcInputError, parseWorldCaptureJson, parseWorldCaptureOperation, worldWireInteger } from "../src/server/world-capture-rpc-contract";
 import { WorldCaptureError, captureBytes, captureCryptoKey, captureHash, captureIdentity, type WorldCaptureIdentity, type RemoteWorldGeneration } from "../src/server/world-public-capture-contract";
 import { isRenderableWorld } from "../src/server/world-readiness";
+import type { WorldSnapshot } from "../src/contracts";
 
 export interface WorldCaptureRpcEnvironment {
   WORLDS_DB?: HistoryD1Binding; FACTORY_STORAGE_SECRET?: string; FACTORY_STORAGE_MODE?: string;
@@ -73,7 +74,7 @@ export async function worldCaptureRpc(request: Request, env: WorldCaptureRpcEnvi
     if (op.op === "status") result = { ...status, admissionFenced: fence(), retirementQuiet: "unknown" };
     else if (op.op === "getMany" || op.op === "summaries") {
       const rows: unknown[] = [];
-      for (const key of op.keys) { checkTime(); const row = await core.get(key); if (row) { const w = JSON.parse(row.snapshot); rows.push(op.op === "getMany" ? { key, ...row } : { key, repo: w.repo, collectedAt: w.collectedAt, expiresAt: row.expiresAt, ready: isRenderableWorld(w) }); } }
+      for (const key of op.keys) { checkTime(); const row = await core.get(key); if (row) { let w: WorldSnapshot; try { w = parseWorldCaptureJson(row.snapshot) as WorldSnapshot; } catch { return reject("WORLD_STORAGE_UNAVAILABLE", 503); } rows.push(op.op === "getMany" ? { key, ...row } : { key, repo: w.repo, collectedAt: w.collectedAt, expiresAt: row.expiresAt, ready: isRenderableWorld(w) }); } }
       if ((await core.status()).revision !== status.revision) return reject("WORLD_STORAGE_READ_CONFLICT", 503); result = rows;
     } else if (op.op === "captureBegin") result = await core.begin(op.repo, { explicitRevalidation: op.explicitRevalidation });
     else if (op.op === "captureAssert") result = await core.assert(op.generation);
