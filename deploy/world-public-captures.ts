@@ -165,7 +165,7 @@ export class D1PublicCaptureCore {
     return canonical;
   }
   private async put(db: HistoryD1Binding, old: State, n: State, repo: string, write: WorldCaptureWrite, changes: HistoryStatement[]) {
-    if (old.view[4].some(w => w[0] === repo && w[2] > write.savedAt) || n.view[5].some(a => a[0] === repo)) return conflict();
+    if (old.view[4].some(w => w[0] === repo && w[2] > write.savedAt)) return conflict();
     const manifest: Manifest = [repo, write.expiresAt, write.savedAt, await captureHash(write.snapshot), "runtime", captureBytes(write.snapshot)], pieces = captureChunks(write.snapshot);
     changes.push(this.statement(db, `INSERT INTO worlds(repo,snapshot,expires_at,saved_at,snapshot_sha256,origin) VALUES(?,(${pieces.map(() => "?").join("||")}),?,?,?,'runtime') ON CONFLICT(repo) DO UPDATE SET snapshot=excluded.snapshot,expires_at=excluded.expires_at,saved_at=excluded.saved_at,snapshot_sha256=excluded.snapshot_sha256,origin=excluded.origin`, repo, ...pieces, write.expiresAt, write.savedAt, manifest[3]));
     n.view[4] = [...n.view[4].filter(w => w[0] !== repo), manifest];
@@ -173,12 +173,21 @@ export class D1PublicCaptureCore {
     if (!keep.has(repo)) return conflict();
     for (const w of n.view[4]) if (!keep.has(w[0])) changes.push(this.statement(db, "DELETE FROM worlds WHERE repo=?", w[0]));
     n.view[4] = retained;
+    // A newly observed real canonical replaces an old alias at that name.
+    // Retention also removes aliases whose target was physically evicted,
+    // matching the original store without touching any privacy authority.
+    changes.push(this.statement(db, "DELETE FROM world_aliases WHERE alias=? OR canonical NOT IN (SELECT repo FROM worlds)", repo));
+    n.view[5] = n.view[5].filter(a => a[0] !== repo && keep.has(a[1]));
   }
   private alias(db: HistoryD1Binding, n: State, input: string, canonical: string, changes: HistoryStatement[]) {
-    if (input === canonical) return;
-    if (n.view[5].some(a => a[0] === canonical || a[1] === input)) return conflict();
-    const previous = n.view[5].find(a => a[0] === input), rowid = previous?.[2] ?? increment(Math.max(0, ...n.view[5].map(a => a[2])));
+    // Never delete a valid source to install an alias to an absent target.
+    if (input === canonical || !n.view[4].some(w => w[0] === canonical)) return;
+    const previous = n.view[5].find(a => a[0] === input);
     changes.push(this.statement(db, "DELETE FROM worlds WHERE repo=?", input)); n.view[4] = n.view[4].filter(w => w[0] !== input);
+    // A canonical can move again. Its former incoming aliases are removed,
+    // rather than chained to input -> canonical. Unaffected rowids survive.
+    changes.push(this.statement(db, "DELETE FROM world_aliases WHERE canonical=?", input)); n.view[5] = n.view[5].filter(a => a[1] !== input);
+    const rowid = previous?.[2] ?? increment(Math.max(0, ...n.view[5].map(a => a[2])));
     changes.push(this.statement(db, "INSERT INTO world_aliases(rowid,alias,canonical) VALUES(?,?,?) ON CONFLICT(alias) DO UPDATE SET canonical=excluded.canonical", rowid, input, canonical));
     n.view[5] = [...n.view[5].filter(a => a[0] !== input), [input, canonical, rowid]];
     if (n.view[5].length > L.aliases) {
@@ -208,7 +217,7 @@ export class D1PublicCaptureCore {
   }
   async aliasLegacy(input: string, target: string) {
     const repo = captureKey(input), canonical = captureKey(target);
-    return this.run(async db => { const s = await this.state(db); this.admitted(s, [repo, canonical, this.resolve(s, repo), this.resolve(s, canonical)]); const n = this.next(s), changes: HistoryStatement[] = []; this.alias(db, n, repo, canonical, changes); await this.save(db, s, n, changes); });
+    return this.run(async db => { const s = await this.state(db); this.admitted(s, [repo, canonical, this.resolve(s, repo), this.resolve(s, canonical)]); if (repo === canonical || !s.view[4].some(w => w[0] === canonical)) return; const n = this.next(s), changes: HistoryStatement[] = []; this.alias(db, n, repo, canonical, changes); await this.save(db, s, n, changes); });
   }
   async evict(input: string) {
     const repo = captureKey(input);

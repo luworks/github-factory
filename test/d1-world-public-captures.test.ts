@@ -270,3 +270,82 @@ test("SYNTHETIC malformed/oversized snapshots and rollback of ignored snapshot b
     expect(await caught(f.core.commit(next, write()))).toMatchObject({ writeOutcome: "unknown" }); expect(f.dump()).toBe(badDump);
   } finally { f.close(); }
 });
+
+type AliasTransition = "canonical-replacement" | "incoming-cleanup" | "eviction-cleanup";
+async function aliasTransition(kind: AliasTransition) {
+  const f = await syntheticWorldD1();
+  if (kind === "eviction-cleanup") {
+    for (let i = 0; i < 100; i++) { const repo = `synthetic/retained-${String(i).padStart(3, "0")}`, w = write(repo, 1000 + i); f.a.db.query("INSERT INTO worlds VALUES(?,?,?,?,?,?)").run(repo, w.snapshot, w.expiresAt, w.savedAt, await captureHash(w.snapshot), "migration:synthetic"); }
+    await f.reseal(); await f.core.aliasLegacy(known, "synthetic/retained-000"); await f.core.aliasLegacy(unrelated, "synthetic/retained-099");
+  } else {
+    await seed(f); if (kind === "canonical-replacement") await f.core.aliasLegacy(input, canonical);
+  }
+  // Unrelated durable privacy authority must survive every cache transition.
+  const denied = await f.core.begin("synthetic/retained-private"); await f.core.revoke(denied);
+  const generation = await f.core.begin(kind === "incoming-cleanup" ? canonical : input, explicit), saved = write(kind === "eviction-cleanup" ? canonical : input, 4000);
+  return { f, generation, saved, async verify() {
+    expect((await f.other.get(kind === "incoming-cleanup" ? canonical : input))?.repo).toBe(kind === "eviction-cleanup" ? canonical : input);
+    if (kind === "canonical-replacement") { expect((await f.other.get(canonical))?.repo).toBe(canonical); expect((await f.other.get(known))?.repo).toBe(canonical); }
+    else { expect(await f.other.get(known)).toBeNull(); expect(f.a.db.query("SELECT * FROM world_aliases WHERE alias=?").get(known)).toBeNull(); }
+    expect((await f.other.inspect(generation)).status).toBe("committed"); expect((await f.other.inspect(denied)).status).toBe("denied"); expect(await f.other.get("synthetic/retained-private")).toBeNull();
+  } };
+}
+
+for (const kind of ["canonical-replacement", "incoming-cleanup", "eviction-cleanup"] as const) {
+  test(`SYNTHETIC ${kind} matches original one-hop semantics and preserves unrelated bytes/rowids/barriers`, async () => {
+    const { f, generation, saved, verify } = await aliasTransition(kind);
+    try {
+      const privacy = f.a.db.query("SELECT * FROM world_capture_barriers ORDER BY repo").all(), receipt = f.a.db.query("SELECT * FROM world_capture_generations WHERE status='denied'").all();
+      const preserved = kind === "eviction-cleanup" ? "synthetic/retained-099" : unrelated, raw = f.a.db.query("SELECT * FROM worlds WHERE repo=?").get(preserved), aliasKey = kind === "eviction-cleanup" ? unrelated : kind === "canonical-replacement" ? known : undefined;
+      const alias = aliasKey ? f.a.db.query("SELECT rowid,* FROM world_aliases WHERE alias=?").get(aliasKey) : null;
+      await f.other.commit(generation, saved); await verify();
+      expect(f.a.db.query("SELECT * FROM worlds WHERE repo=?").get(preserved)).toEqual(raw); if (aliasKey) expect(f.a.db.query("SELECT rowid,* FROM world_aliases WHERE alias=?").get(aliasKey)).toEqual(alias);
+      expect(f.a.db.query("SELECT * FROM world_capture_barriers ORDER BY repo").all()).toEqual(privacy); expect(f.a.db.query("SELECT * FROM world_capture_generations WHERE status='denied'").all()).toEqual(receipt);
+    } finally { f.close(); }
+  });
+
+  test(`SYNTHETIC EVERY ${kind} statement interruption keeps snapshot, aliases and one-use receipt atomic`, async () => {
+    const probe = await aliasTransition(kind); let count = 0;
+    try { await probe.f.core.commit(probe.generation, probe.saved); count = probe.f.a.calls.at(-1)!.length; } finally { probe.f.close(); }
+    expect(count).toBeGreaterThan(5);
+    for (let statement = 0; statement < count; statement++) {
+      const { f, generation, saved } = await aliasTransition(kind);
+      try {
+        const before = f.dump(); f.a.interrupt = { batch: f.a.calls.length, statement };
+        expect(await caught(f.core.commit(generation, saved))).toMatchObject({ writeOutcome: "unknown" }); expect(f.dump()).toBe(before); expect((await f.other.inspect(generation)).status).toBe("active");
+      } finally { f.close(); }
+    }
+  });
+
+  test(`SYNTHETIC stale ${kind} CAS cannot commit partial snapshot or alias deletes`, async () => {
+    const { f, generation, saved } = await aliasTransition(kind);
+    try {
+      let winner = ""; f.a.beforeBatch = async () => { await f.other.begin("synthetic/concurrent-authority"); winner = f.dump(); };
+      expect(await caught(f.core.commit(generation, saved))).toMatchObject({ writeOutcome: "unknown" }); expect(f.dump()).toBe(winner); expect((await f.other.inspect(generation)).status).toBe("active");
+    } finally { f.close(); }
+  });
+}
+
+test("SYNTHETIC absent target alias is a non-destructive no-op, preserving source, existing mapping and authority revision", async () => {
+  const f = await syntheticWorldD1();
+  try {
+    await seed(f); const before = f.dump(), calls = f.a.calls.length;
+    for (const key of [canonical, known, input]) { await f.core.aliasLegacy(key, "synthetic/missing-target"); expect(f.dump()).toBe(before); }
+    expect(f.a.calls.length).toBe(calls); expect((await f.other.get(canonical))?.snapshot).toBe(write().snapshot); expect((await f.other.get(known))?.repo).toBe(canonical);
+  } finally { f.close(); }
+});
+
+test("SYNTHETIC alias replacement and missing-target no-op cannot cross historical barriers or reopen former aliases implicitly", async () => {
+  const f = await syntheticWorldD1();
+  try {
+    await seed(f); const stale = await f.core.begin(known, explicit), g = await f.core.begin(canonical); await f.core.revoke(g);
+    const fresh = await f.other.begin(canonical, explicit); await f.other.commit(fresh, write(canonical, 4000));
+    const before = f.dump();
+    await expect(f.core.putLegacy(write(known, 5000))).rejects.toMatchObject({ code: "WORLD_CAPTURE_CONFLICT" });
+    await expect(f.core.aliasLegacy(canonical, "synthetic/missing-target")).rejects.toMatchObject({ code: "WORLD_CAPTURE_CONFLICT" });
+    await expect(f.core.commit(stale, write(known, 5000))).rejects.toMatchObject({ code: "WORLD_CAPTURE_CONFLICT" }); expect(f.dump()).toBe(before); expect(await f.other.get(known)).toBeNull();
+    const canonicalBefore = f.a.db.query("SELECT * FROM worlds WHERE repo=?").get(canonical), revalidate = await f.core.begin(known, explicit); await f.other.commit(revalidate, write(known, 5000));
+    expect((await f.other.get(known))?.repo).toBe(known); expect(f.a.db.query("SELECT * FROM worlds WHERE repo=?").get(canonical)).toEqual(canonicalBefore);
+    await expect(f.core.putLegacy(write(known, 6000))).rejects.toMatchObject({ code: "WORLD_CAPTURE_CONFLICT" });
+  } finally { f.close(); }
+});
