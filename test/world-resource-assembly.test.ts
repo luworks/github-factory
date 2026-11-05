@@ -223,5 +223,58 @@ if (!mode) {
       const graph = await initializeWorldResources(getConfig({ ...assemblyEnv(), MOONSHOT_WORLD_CAPTURE_ENABLED: "false" }), { network: async () => { calls++; throw Error("forbidden"); }, importKey: async () => { calls++; throw Error("forbidden"); } });
       expect(graph.store).toBeInstanceOf(D1WorldStore); expect(calls).toBe(0); expect(readdirSync(process.cwd())).toEqual([]);
     });
+
+    test("CHILD monotonic bootstrap control publishes one graph with the original five clock observations", async () => {
+      const samples = [100, 110, 120, 130, 140]; let reads = 0, imports = 0, effects = 0;
+      const initialize = createWorldResourceInitializer(getConfig(assemblyEnv()), {
+        clock: () => samples[reads++]!, importKey: async raw => { imports++; return importRaw(raw); },
+        network: async () => { effects++; throw Error("SYNTHETIC forbidden"); }, makeQuota: () => { effects++; throw Error("SYNTHETIC forbidden"); },
+      });
+      const pending = initialize(), graph = await pending; expect(graph.store).toBeInstanceOf(D1CaptureWorldStore); expect(initialize()).toBe(pending);
+      expect(reads).toBe(5); expect(imports).toBe(1); expect(effects).toBe(0); expect(readdirSync(process.cwd())).toEqual([]);
+    });
+
+    for (const phase of [1, 2, 3, 4]) test(`CHILD backward clock at bootstrap observation ${phase} rejects every regression including steps above the origin`, async () => {
+      const samples = [100, 110, 120, 130, 140]; samples[phase] = samples[phase - 1]! - 1;
+      let reads = 0, imports = 0, effects = 0;
+      const initialize = createWorldResourceInitializer(getConfig(assemblyEnv()), {
+        clock: () => samples[Math.min(reads++, samples.length - 1)]!, importKey: async raw => { imports++; return importRaw(raw); },
+        network: async () => { effects++; throw Error("SYNTHETIC forbidden"); }, makeQuota: () => { effects++; throw Error("SYNTHETIC forbidden"); },
+      });
+      const pending = initialize(), error = await caught(pending); expect(error).toBeInstanceOf(Error); expect((error as Error).message).toBe("World capture initialization unavailable");
+      expect(initialize()).toBe(pending); expect(await caught(initialize())).toBe(error); expect(reads).toBe(phase + 1); expect(imports).toBe(phase < 3 ? 0 : 1);
+      await tick(); expect(effects).toBe(0); expect(readdirSync(process.cwd())).toEqual([]);
+    });
+
+    for (const phase of [0, 1, 2, 3, 4]) test(`CHILD thrown clock at bootstrap observation ${phase} stays redacted and latched without delayed graph or IO`, async () => {
+      let reads = 0, imports = 0, effects = 0;
+      const initialize = createWorldResourceInitializer(getConfig(assemblyEnv()), {
+        clock: () => { if (reads++ === phase) throw Error("SYNTHETIC sensitive clock-provider detail"); return 100; },
+        importKey: async raw => { imports++; return importRaw(raw); }, network: async () => { effects++; throw Error("SYNTHETIC forbidden"); }, makeQuota: () => { effects++; throw Error("SYNTHETIC forbidden"); },
+      });
+      const pending = initialize(), error = await caught(pending); expect(error).toBeInstanceOf(Error); expect((error as Error).message).toBe("World capture initialization unavailable");
+      expect(initialize()).toBe(pending); expect(await caught(initialize())).toBe(error); expect(reads).toBe(phase + 1); expect(imports).toBe(phase < 3 ? 0 : 1);
+      await tick(); expect(effects).toBe(0); expect(readdirSync(process.cwd())).toEqual([]);
+    });
+
+    for (const value of [NaN, Infinity, -Infinity]) for (const phase of [0, 1, 2, 3, 4]) test(`CHILD nonfinite clock ${value} at bootstrap observation ${phase} fails closed before publication`, async () => {
+      let reads = 0, imports = 0, effects = 0;
+      const initialize = createWorldResourceInitializer(getConfig(assemblyEnv()), {
+        clock: () => reads++ === phase ? value : 100, importKey: async raw => { imports++; return importRaw(raw); },
+        network: async () => { effects++; throw Error("SYNTHETIC forbidden"); }, makeQuota: () => { effects++; throw Error("SYNTHETIC forbidden"); },
+      });
+      const pending = initialize(), error = await caught(pending); expect(error).toBeInstanceOf(Error); expect((error as Error).message).toBe("World capture initialization unavailable");
+      expect(initialize()).toBe(pending); expect(await caught(initialize())).toBe(error); expect(reads).toBe(phase + 1); expect(imports).toBe(phase < 3 ? 0 : 1);
+      await tick(); expect(effects).toBe(0); expect(readdirSync(process.cwd())).toEqual([]);
+    });
+
+    test("CHILD disabled profile never observes bootstrap clock or imports a key", async () => {
+      let effects = 0;
+      const graph = await initializeWorldResources(getConfig({}), {
+        clock() { effects++; throw Error("SYNTHETIC disabled clock"); }, importKey: async () => { effects++; throw Error("SYNTHETIC disabled key"); },
+        makeQuota() { effects++; throw Error("SYNTHETIC forbidden"); }, network: async () => { effects++; throw Error("SYNTHETIC forbidden"); },
+      });
+      expect(graph).toBeDefined(); expect(effects).toBe(0); expect(readdirSync(process.cwd())).toEqual([]);
+    });
   }
 }

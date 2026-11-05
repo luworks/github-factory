@@ -87,10 +87,16 @@ export function createWorldResourceInitializer(config: Config, options: Bootstra
     const importKey = settings.importKey ?? ((raw: Uint8Array) => crypto.subtle.importKey("raw", raw as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]));
     bootstrap = async () => {
       if (!capture) return resources(bound, settings);
-      const start = clock();
-      const check = () => { const current = clock(); if (!Number.isFinite(start) || !Number.isFinite(current) || current < start || current - start >= timeout) throw new Error("World capture initialization unavailable"); };
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
+        const start = clock();
+        if (!Number.isFinite(start)) throw new Error("World capture initialization unavailable");
+        let last = start;
+        const check = () => {
+          const current = clock();
+          if (!Number.isFinite(current) || current < last || current - start >= timeout) throw new Error("World capture initialization unavailable");
+          last = current;
+        };
         check();
         const deadline = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("World capture initialization unavailable")), timeout); });
         const raw = Uint8Array.from(capture.keyHex.match(/../g)!, v => parseInt(v, 16));
