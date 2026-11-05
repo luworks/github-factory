@@ -17,7 +17,7 @@ export interface StorageEnvironment {
   WORLDS_DB?: WorldD1Binding; FACTORY_STORAGE_SECRET?: string;
   FACTORY_STORAGE_DATABASE_ID?: string; FACTORY_MIGRATION_EPOCH?: string;
   FACTORY_SOURCE_SHA?: string; FACTORY_WORKER_BUNDLE_SHA256?: string;
-  FACTORY_ADMISSION_FENCE?: string;
+  FACTORY_ADMISSION_FENCE?: string; FACTORY_STORAGE_MODE?: string;
 }
 const reply = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 const record = (x: unknown): x is Record<string, unknown> => Boolean(x) && typeof x === "object" && !Array.isArray(x);
@@ -57,6 +57,8 @@ export async function worldStorageRpc(request: Request, env: StorageEnvironment)
   let identity: StorageIdentity;
   const ok = (result: unknown) => reply({ ok: true, backend: "d1", op: body.op, identity, result });
   try {
+    if (!["probe-only", "worlds"].includes(env.FACTORY_STORAGE_MODE || "")) throw new Error("Storage mode unavailable");
+    if (env.FACTORY_STORAGE_MODE === "probe-only" && body.op !== "status" && body.op !== "probe") return reply({ error: "This bridge permits synthetic probes only" }, 403);
     const stored = await db.prepare("SELECT database_uuid,binding_nonce FROM storage_identity WHERE singleton=1").first<{ database_uuid: string; binding_nonce: string }>();
     if (!stored || stored.database_uuid !== env.FACTORY_STORAGE_DATABASE_ID || !/^[a-f0-9]{32}$/.test(stored.binding_nonce) ||
       !/^[a-f0-9]{32}$/.test(env.FACTORY_MIGRATION_EPOCH || "") || !/^[a-f0-9]{40}$/.test(env.FACTORY_SOURCE_SHA || "") || !/^[a-f0-9]{64}$/.test(env.FACTORY_WORKER_BUNDLE_SHA256 || "")) throw new Error("D1 identity unavailable");
@@ -147,14 +149,26 @@ export async function worldStorageRpc(request: Request, env: StorageEnvironment)
       const id = `storage-rpc-synthetic-${body.nonce}`;
       if (body.action === "rollback") {
         if (await db.prepare("SELECT id FROM migration_sentinels WHERE id=?").bind(id).first()) throw new TypeError();
-        let rejected = false;
+        const controlId = `${id}-control`;
+        const control = await db.prepare("INSERT INTO migration_sentinels(id,payload) VALUES(?,'SYNTHETIC ROLLBACK WRITE CONTROL')").bind(controlId).run();
+        const observed = await db.prepare("SELECT payload FROM migration_sentinels WHERE id=?").bind(controlId).first<{ payload: string }>();
+        if (!control.success || observed?.payload !== "SYNTHETIC ROLLBACK WRITE CONTROL") throw new Error("D1 write control unavailable");
+        const cleaned = await db.prepare("DELETE FROM migration_sentinels WHERE id=?").bind(controlId).run();
+        if (!cleaned.success || await db.prepare("SELECT id FROM migration_sentinels WHERE id=?").bind(controlId).first()) throw new Error("D1 write control cleanup unavailable");
+        let expectedDuplicate = false;
         try { await db.batch([
           db.prepare("INSERT INTO migration_sentinels(id,payload) VALUES(?,'SYNTHETIC ATOMIC ROLLBACK PROBE')").bind(id),
           db.prepare("INSERT INTO migration_sentinels(id,payload) VALUES(?,'EXPECTED DUPLICATE FAILURE')").bind(id),
-        ]); } catch { rejected = true; }
+        ]); } catch (error) {
+          // Absent row alone cannot prove rollback: transport/pre-execution
+          // failures also leave no row. The known-empty nonce can hit this
+          // exact duplicate constraint only after its first INSERT executes.
+          const message = error instanceof Error ? error.message : "";
+          expectedDuplicate = /^(?:D1_ERROR: )?UNIQUE constraint failed: migration_sentinels\.id(?:: SQLITE_CONSTRAINT(?:_PRIMARYKEY)?)?$/.test(message);
+        }
         const absent = !(await db.prepare("SELECT id FROM migration_sentinels WHERE id=?").bind(id).first());
-        if (!rejected || !absent) throw new Error("D1 rollback unverified");
-        return ok({ batchRejected: true, rolledBack: true, syntheticRowAbsent: true });
+        if (!expectedDuplicate || !absent) throw new Error("D1 rollback unverified");
+        return ok({ batchRejected: true, rolledBack: true, syntheticRowAbsent: true, writeControlVerified: true, expectedDuplicateConstraint: true });
       }
       if (body.action === "write") { const result = await db.prepare("INSERT INTO migration_sentinels(id,payload) VALUES(?,'SYNTHETIC PRIVATE STORAGE PROBE') ON CONFLICT(id) DO NOTHING").bind(id).run(); if (!result.success) throw new Error("D1 unavailable"); return ok({ written: true }); }
       if (body.action === "read") return ok(await db.prepare("SELECT id,payload FROM migration_sentinels WHERE id=?").bind(id).first());

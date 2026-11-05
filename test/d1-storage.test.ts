@@ -18,7 +18,7 @@ const secret = "synthetic-storage-secret-32-characters-long";
 const endpoint = "https://chaorders.com/github-factory/_storage";
 const databaseId = "11111111-1111-4111-8111-111111111111";
 const expectedIdentity = { databaseId, bindingNonce: "a".repeat(32), epoch: "b".repeat(32), sourceSha: "c".repeat(40), workerBundleSha256: "d".repeat(64), admissionFenced: true };
-const fixtureEnv = { FACTORY_STORAGE_SECRET: secret, FACTORY_STORAGE_DATABASE_ID: databaseId, FACTORY_MIGRATION_EPOCH: expectedIdentity.epoch, FACTORY_SOURCE_SHA: expectedIdentity.sourceSha, FACTORY_WORKER_BUNDLE_SHA256: expectedIdentity.workerBundleSha256, FACTORY_ADMISSION_FENCE: expectedIdentity.epoch };
+const fixtureEnv = { FACTORY_STORAGE_MODE: "worlds", FACTORY_STORAGE_SECRET: secret, FACTORY_STORAGE_DATABASE_ID: databaseId, FACTORY_MIGRATION_EPOCH: expectedIdentity.epoch, FACTORY_SOURCE_SHA: expectedIdentity.sourceSha, FACTORY_WORKER_BUNDLE_SHA256: expectedIdentity.workerBundleSha256, FACTORY_ADMISSION_FENCE: expectedIdentity.epoch };
 const now = Date.parse("2026-11-04T18:00:00Z");
 function fixture(name = "browser-fixture") {
   const world = syntheticWorld(); world.source = "github";
@@ -270,5 +270,31 @@ test("SYNTHETIC whole-export request larger than one MiB imports atomically unde
     const body = { op: "migrationImport", export: source, identity: expectedIdentity };
     expect(Buffer.byteLength(JSON.stringify(body))).toBeGreaterThan(1024 * 1024); expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(2 * 1024 * 1024);
     expect((await b.rpc(body)).status).toBe(200); expect((await b.store.status()).worlds).toBe(16);
+  } finally { b.db.close(); }
+});
+
+test("SYNTHETIC atomic import roundtrips NOASSERTION/null/custom license without changing snapshot hashes or stale TTL", async () => {
+  const b = binding();
+  try {
+    const worlds = [null, "NOASSERTION", "LicenseRef-Custom"].map((license, i) => { const w = fixture(`license-${i}`); w.repo.license = license; return { repo: w.repo.fullName, snapshot: JSON.stringify(w), expires_at: now - 1000, saved_at: now - 100_000 }; });
+    const aliases: { alias: string; canonical: string }[] = [];
+    const source = { migrationId: `worlds-${"7".repeat(32)}`, sourceHead: expectedIdentity.sourceSha, sourceSha256: await exportDigest({ worlds, aliases }), worlds, aliases };
+    expect((await b.rpc({ op: "migrationImport", export: source, identity: expectedIdentity })).status).toBe(200);
+    for (const row of worlds) { const stored = await b.store.get(row.repo, now); expect(JSON.stringify(stored?.world)).toBe(row.snapshot); expect(stored?.expiresAt).toBe(row.expires_at); expect(stored?.fresh).toBe(false); }
+  } finally { b.db.close(); }
+});
+
+
+test("SYNTHETIC rollback proof cannot turn a pre-execution/transport batch exception into PASS", async () => {
+  const b = binding({ interruptBatchAt: 0 });
+  try { expect((await b.rpc({ op: "probe", action: "rollback", nonce: "6".repeat(32) })).status).toBe(503); expect((b.db.query("SELECT COUNT(*) n FROM migration_sentinels").get() as { n: number }).n).toBe(0); }
+  finally { b.db.close(); }
+});
+test("SYNTHETIC bridge probe-only mode denies every world read/write/import even with the correct storage key", async () => {
+  const b = binding(); b.env.FACTORY_STORAGE_MODE = "probe-only";
+  try {
+    for (const op of ["getMany", "summaries", "put", "alias", "delete", "migrationSnapshot", "migrationImport"]) expect((await b.rpc({ op })).status).toBe(403);
+    expect((await b.rpc({ op: "status" })).status).toBe(200);
+    expect((await b.rpc({ op: "probe", action: "rollback", nonce: "5".repeat(32) })).status).toBe(200);
   } finally { b.db.close(); }
 });
