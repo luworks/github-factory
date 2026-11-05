@@ -44,7 +44,7 @@ export class ClientQuota {
   constructor(path: string, private limits: { requestsPerMinute: number; collectionsPerHour: number; aiPerHour: number; aiGlobalPerHour?: number }, private now = Date.now) {
     if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     this.db = new Database(path, { create: true });
-    this.db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=3000; CREATE TABLE IF NOT EXISTS client_quota (identity TEXT NOT NULL, bucket TEXT NOT NULL, window INTEGER NOT NULL, expires_at INTEGER NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(identity,bucket,window))");
+    this.db.exec("PRAGMA busy_timeout=3000; PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS client_quota (identity TEXT NOT NULL, bucket TEXT NOT NULL, window INTEGER NOT NULL, expires_at INTEGER NOT NULL, used INTEGER NOT NULL, PRIMARY KEY(identity,bucket,window))");
   }
   take(identity: string, bucket: AccessBucket) {
     const now = this.now(), duration = bucket === "request" ? 60_000 : 3_600_000;
