@@ -83,7 +83,7 @@ export function validateImmutableTreeFrame(input: unknown, commitInput: unknown)
   for(let i=0;i<input.entries.length&&i<L.frameEntries;i++){
     const parsed=treeEntry(input.entries[i]);if(!parsed.ok)return parsed;const e=parsed.value;
     if(s.value.prefix&&e.path!==s.value.prefix&&!e.path.startsWith(s.value.prefix+"/"))return fail("path-outside-scope");
-    const old=byPath.get(e.path);if(old){if(old.type!==e.type||old.sha!==e.sha)return fail("conflicting-tree-path");duplicate++;processed++;continue;}
+    const old=byPath.get(e.path);if(old){if(normalized)return fail("normalized-duplicate-path");if(old.type!==e.type||old.sha!==e.sha)return fail("conflicting-tree-path");duplicate++;processed++;continue;}
     const size=topologyBytes(e)+1;if(!normalized&&used+size>L.frameBytes){limits.push("byte-cap");break;}
     entries.push(e);byPath.set(e.path,e);used+=size;processed++;
   }
@@ -99,6 +99,8 @@ export const immutableFramePayloadKey = (f: ImmutableTreeFrame) => JSON.stringif
 function withinScope(scope:TreeScope,path:string){return !scope.prefix||path===scope.prefix||path.startsWith(scope.prefix+"/");}
 function conflictingTreeObservations(a:ImmutableTreeFrame,b:ImmutableTreeFrame){
  const left=new Map(a.entries.map(e=>[e.path,e])),right=new Map(b.entries.map(e=>[e.path,e]));
+ const nonTreeAncestor=(e:ImmutableTreeEntry,observed:Map<string,ImmutableTreeEntry>)=>{const parts=e.path.split("/");for(let i=1;i<parts.length;i++){const ancestor=observed.get(parts.slice(0,i).join("/"));if(ancestor&&ancestor.type!=="tree")return true;}return false;};
+ if(a.entries.some(e=>nonTreeAncestor(e,right))||b.entries.some(e=>nonTreeAncestor(e,left)))return true;
  return a.entries.some(e=>{const other=right.get(e.path);return other&&(other.type!==e.type||other.sha!==e.sha)||!other&&b.completeness==="full"&&withinScope(b.scope,e.path);})||b.entries.some(e=>!left.has(e.path)&&a.completeness==="full"&&withinScope(a.scope,e.path));
 }
 export function coalesceImmutableFrame(a: ImmutableTreeFrame,b: ImmutableTreeFrame,commit:ImmutableCommit):TopologyResult<ImmutableTreeFrame>{

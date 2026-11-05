@@ -97,3 +97,14 @@ test("SYNTHETIC unsupported scope/entry qualifiers cannot be erased into a full 
 test("SYNTHETIC unobserved nullable metadata can be refined without inventing a root or a payload conflict",()=>{
  const unknown=unwrap(validateImmutableCommit({...commit(1,null),authorAt:null,committerAt:null})),observed=unwrap(validateImmutableCommit(commit(1))),a=unwrap(coalesceImmutableCommit(unknown,observed)),b=unwrap(coalesceImmutableCommit(observed,unknown));expect(a).toEqual(b);expect(a.parents).toEqual([]);expect(a.authorAt).toBe(observed.authorAt);expect(unwrap(firstParentSpine(anchor(1),[unknown])).reachedRoot).toBeNull();expect(unwrap(firstParentSpine(anchor(1),[unknown,observed])).reachedRoot).toBe(true);expect(coalesceImmutableCommit(unwrap(validateImmutableCommit(commit(1,[2,3]))),unwrap(validateImmutableCommit(commit(1,[3,2]))))).toMatchObject({ok:false,code:"immutable-commit-conflict"});
 });
+
+test("SYNTHETIC reviewed normalized duplicate paths are rejected while raw duplicate normalization stays idempotent",()=>{
+ const c=commit(1),raw=frame(c,[entry("a"),entry("a")]),declared={...raw,sourceCompleteness:"full",inputEntryCount:2,omittedInputEntries:0,deduplicatedInputEntries:0,limits:[],omittedProvenance:0};expect(validateImmutableTreeFrame(declared,c)).toMatchObject({ok:false,code:"normalized-duplicate-path"});const good=unwrap(validateImmutableTreeFrame(raw,c));expect(good.entries).toHaveLength(1);expect(good.deduplicatedInputEntries).toBe(1);expect(unwrap(validateImmutableTreeFrame(JSON.parse(JSON.stringify(good)),c))).toEqual(good);
+});
+
+test("SYNTHETIC same-tree joint observations reject every non-tree ancestor across frames/scopes/directions",()=>{
+ const a=commit(1),b={...commit(2,[1]),treeSha:a.treeSha};
+ for(const type of ["blob","symlink","submodule"])for(const parent of ["dir","dir/nested"]){const before=frame(a,[entry(parent,type)],"partial",parent),after=frame(b,[entry("dir/nested/child")],"partial","dir/nested");for(const [x,y,cx,cy]of [[before,after,a,b],[after,before,b,a]]as const)expect(compareTopologyFrames(x,y,cx,cy)).toMatchObject({ok:false,code:"immutable-tree-conflict"});for(const pair of [[before,after],[after,before]])expect(createTopologyWindow(anchor(2),[a,b],pair)).toMatchObject({ok:false,code:"immutable-tree-conflict"});}
+ const parent=frame(a,[entry("dir","tree")],"partial"),child=frame(b,[entry("dir/child")],"partial");expect(compareTopologyFrames(parent,child,a,b).ok).toBe(true);expect(createTopologyWindow(anchor(2),[a,b],[parent,child]).ok).toBe(true);
+ const changed={...b,treeSha:sha(9999)},old=frame(a,[entry("dir","blob")]),next=frame(changed,[entry("dir","tree"),entry("dir/child")]);const valid=unwrap(compareTopologyFrames(old,next,a,changed));expect(valid.exactEndpoints).toBe(true);expect(valid.modified[0].path).toBe("dir");expect(valid.added.map(e=>e.path)).toEqual(["dir/child"]);
+});
