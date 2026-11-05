@@ -4,7 +4,7 @@ import { analyzeCollection } from "./analysis";
 import { GitHubError, parseRepo, type RepoCollection, type RepoRef } from "./github";
 import { getWorldResources } from "./world-resources";
 import { isRenderableWorld } from "./world-readiness";
-import type { CachedWorld, SnapshotStore, WorldStorageStatus } from "./world-storage";
+import { WorldStorageError, type CachedWorld, type SnapshotStore, type WorldStorageStatus, type PublicCaptureGeneration } from "./world-storage";
 import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
 
 interface Collector {
@@ -53,10 +53,21 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     const ref = parseRepo(input);
     return cachedSnapshot(await options.store.get(ref.fullName, now(), { readOnly: true }));
   };
-  const loadWorld = async (input: string, settings?: { refresh?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
+  const loadWorld = async (input: string, settings?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
     const ref = parseRepo(input),
       key = ref.fullName.toLowerCase();
     const cached = await options.store.get(key, now());
+    const authority = options.store.publicCaptures;
+    if (authority && ["begin", "assert", "commit", "revoke"].some(method => typeof authority[method as keyof typeof authority] !== "function")) throw new WorldStorageError();
+    const fallback = async (error: GitHubError, generation?: PublicCaptureGeneration) => {
+      if (!cached) throw error;
+      if (authority && generation) await authority.assert(generation);
+      // Cached variables predate asynchronous work. Re-read the authority so a
+      // concurrent revocation cannot turn a network/admission error into a leak.
+      const current = await options.store.get(key, now(), { readOnly: true });
+      if (!current) throw new WorldStorageError();
+      return stale(current.world, error);
+    };
     // Navigation is cache-first, including historical snapshots. It must never
     // wait on GitHub, consume collection allowance, or start background work.
     if (cached && !settings?.refresh) return cachedSnapshot(cached)!;
@@ -66,28 +77,40 @@ export function createWorldService(options: { collector: Collector; store: Snaps
     requireAnalysisOpen();
     const failure = cooldown.get(key);
     if (failure && failure.until > now()) {
-      if (cached) return stale(cached.world, failure.error);
+      if (cached) return fallback(failure.error);
       throw failure.error;
     }
     if (active >= maxConcurrent) {
       const error = new GitHubError("WORLD_BUSY", 429, "Repository collection slots are busy; retry shortly.", 5);
-      if (cached) return stale(cached.world, error);
+      if (cached) return fallback(error);
       throw error;
     }
-    // Admission is before any collector work, after free cache/singleflight reads.
-    // Rejection must not create a repository-wide cooldown for other clients.
-    try { settings?.admit?.(); }
-    catch (error) { if (cached) return stale(cached.world, asError(error)); throw error; }
     active++;
-    const promise = (async () => {
+    // Install singleflight before awaiting an asynchronous generation authority.
+    let publish!: (world: WorldSnapshot) => void, fail!: (error: unknown) => void;
+    const promise = new Promise<WorldSnapshot>((resolve, reject) => { publish = resolve; fail = reject; });
+    inflight.set(key, promise);
+    const work = (async () => {
+      let generation: PublicCaptureGeneration | undefined, admitted = false;
       try {
+        requireAnalysisOpen();
+        if (authority) {
+          const pending = authority.begin(key, { explicitRevalidation: settings?.explicitRevalidation === true || settings?.refresh === true });
+          generation = pending && typeof (pending as Promise<PublicCaptureGeneration>).then === "function" ? await pending : pending as PublicCaptureGeneration;
+          if (!generation || generation.repo !== key || !Number.isSafeInteger(generation.sequence) || generation.sequence < 0) throw new WorldStorageError();
+        }
+        // A denied legacy GET must not spend collection allowance or fetch.
+        settings?.admit?.(); admitted = true;
         const collected = await options.collector.collect(ref);
 
         const world = analyzeCollection(collected);
         const expiresAt = now() + 90_000;
         world.refreshAfter = expiresAt;
-        await options.store.put(world, 90_000, now());
-        await options.store.alias?.(key, world.repo.fullName);
+        if (authority) await authority.commit(generation!, world, 90_000, now());
+        else { // Legacy injectable adapters; D1 privacy is NOT advertised ready.
+          await options.store.put(world, 90_000, now());
+          await options.store.alias?.(key, world.repo.fullName);
+        }
         cooldown.set(key, {
           until: now() + 15_000,
           error: new GitHubError("REFRESH_COOLDOWN", 429, "Wait briefly before refreshing.", 15),
@@ -96,12 +119,14 @@ export function createWorldService(options: { collector: Collector; store: Snaps
       } catch (error) {
         if ((error as { code?: string })?.code === "WORLD_STORAGE_UNAVAILABLE") throw error;
         const typed = asError(error);
+        if (!admitted) { if (cached) return await fallback(typed, generation); throw error; }
         cooldown.set(key, { until: now() + Math.max(15, Math.min(3600, typed.retryAfter || 15)) * 1000, error: typed });
-        if (typed.code === "PUBLIC_ONLY") {
-          await options.store.delete?.(key);
+        if (typed.code === "PUBLIC_ONLY" && typed.status === 403) {
+          if (authority) await authority.revoke(key, generation);
+          else await options.store.delete?.(key);
           throw typed;
         }
-        if (cached) return stale(cached.world, typed);
+        if (cached) return await fallback(typed, generation);
         throw typed;
       } finally {
         active--;
@@ -112,7 +137,7 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         }
       }
     })();
-    inflight.set(key, promise);
+    void work.then(publish, fail);
     return promise;
   };
   const listFeatured = async (): Promise<FeaturedProject[]> => {
@@ -149,7 +174,7 @@ function service() {
  * refresh bypasses the 90s TTL after a 15s minimum interval; no AI module is imported.
  * Rejects with GitHubError { status, code, message, retryAfter? } without cached evidence.
  * Failed refreshes retain the original capture timestamp and mark the snapshot STALE. */
-export const loadWorld = (input: string, options?: { refresh?: boolean; admit?: () => void }): Promise<WorldSnapshot> => service().loadWorld(input, options);
+export const loadWorld = (input: string, options?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => service().loadWorld(input, options);
 /** Curated catalog + persisted facts only; ready means a real cached snapshot exists. */
 export const listFeatured = (): Promise<FeaturedProject[]> => service().listFeatured();
 /** Cache-only read: no GitHub or paid requests; null on a miss, STALE note on expiry.

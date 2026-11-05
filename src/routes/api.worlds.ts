@@ -11,7 +11,7 @@ export const Route = createFileRoute("/api/worlds")({
           const body = await readJson(request);
           const repo = repositoryRequest(body);
           const { loadWorld } = await import("../server/service");
-          let w = await loadWorld(repo, { admit: access.admitCollection });
+          let w = await loadWorld(repo, { explicitRevalidation: true, admit: access.admitCollection });
           if (body.enrich === true) {
             const { publicAnalysis, requireAnalysisOpen } = await import("../server/runtime-activity");
             requireAnalysisOpen();
