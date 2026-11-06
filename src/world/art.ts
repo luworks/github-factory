@@ -1,11 +1,12 @@
 import type { NodeKind, StyleId } from "../contracts";
-import { block, cylinder, dome, ellipse, flag, gear, line, panel, poly, type Pen } from "./primitives";
+import { block, cylinder, dome, ellipse, flag, gear, line, markLight, markSmoke, panel, poly, type Pen } from "./primitives";
 function windows(g: Pen, x: number, y: number, n: number, color: string) {
   for (let i = 0; i < n; i++) {
     g.fillStyle = "#263e48";
     g.fillRect(x + i * 10, y, 6, 8);
     g.fillStyle = color;
     g.fillRect(x + i * 10, y + 5, 6, 2);
+    markLight(g, x + i * 10, y, 6, 8, color);
   }
 }
 function dish(g: Pen, x: number, y: number, color: string) {
@@ -39,6 +40,7 @@ function dish(g: Pen, x: number, y: number, color: string) {
     2,
   );
   ellipse(g, x + 10, y - 15, 2, 2, "#f0ac6c");
+  markLight(g, x + 10, y - 15, 2, 2, "#ffb86b", true);
 }
 function arch(g: Pen, x: number, y: number, w: number, h: number, color: string) {
   g.fillStyle = color;
@@ -46,6 +48,8 @@ function arch(g: Pen, x: number, y: number, w: number, h: number, color: string)
   g.beginPath();
   g.ellipse(x, y - h * 0.6, w / 2, h * 0.4, 0, Math.PI, Math.PI * 2);
   g.fill();
+  // Small arches are windows; large ones are doors and stay dark.
+  if (w <= 16) markLight(g, x - w / 2 + 1, y - h * 0.75, w - 2, h * 0.7, "#ffcf7a");
 }
 function hangar(g: Pen, x: number, y: number, military: boolean) {
   poly(
@@ -205,7 +209,7 @@ function lunar(g: Pen, k: NodeKind, t: number) {
       "#d7a365",
       5,
     );
-    gear(g, -25, -52, 12, "#c3d6c6");
+    gear(g, -25, -52, 12, "#c3d6c6", t * 0.5);
   }
   if (k === "external") {
     block(g, -15, 4, 50, 29, 22, "#b8c8bc", "#94a89f", "#557780");
@@ -228,7 +232,11 @@ function lunar(g: Pen, k: NodeKind, t: number) {
     g.fillRect(36 + i * 5, 9 - i * 2, 3, 2);
   }
   // Architectural illumination, not an activity signal.
-  for (const x of [-48, 48]) ellipse(g, x, 6, 2, 2, "#c2e6dd");
+  for (const x of [-48, 48]) {
+    ellipse(g, x, 6, 2, 2, "#c2e6dd");
+    markLight(g, x, 6, 2, 2, "#9ff3ff", true);
+  }
+  markLight(g, -47, -12, 2, 2, "#ffb36b", true);
   if (t > 0) {
     g.globalAlpha = 0.12 + 0.03 * Math.sin(t * 0.7);
     ellipse(g, 0, -3, 54, 18, "#a6e2df");
@@ -277,7 +285,7 @@ function industrial(g: Pen, k: NodeKind, t: number) {
   } else if (k === "infra") {
     for (let i = 0; i < 3; i++) {
       block(g, -31 + i * 29, 3 - (i % 2) * 10, 23, 30, 28, "#8c9a86", "#606e62", "#3a4a47");
-      gear(g, -31 + i * 29, -33 - (i % 2) * 10, 11, "#d7ae5a");
+      gear(g, -31 + i * 29, -33 - (i % 2) * 10, 11, "#d7ae5a", (i % 2 ? -t : t) * 0.9);
     }
     line(
       g,
@@ -316,18 +324,22 @@ function industrial(g: Pen, k: NodeKind, t: number) {
   } else {
     block(g, -9, 4, 83, 46, 41, "#a0a78d", "#7e8873", "#465950");
     block(g, -11, -38, 61, 29, 13, "#667c74", "#465e58", "#2e4543");
-    gear(g, -13, -56, 21, "#c49b56", k === "tool" ? 0 : 0.25);
-    gear(g, 18, -48, 12, "#b3b995");
+    gear(g, -13, -56, 21, "#c49b56", (k === "tool" ? 0 : 0.25) + t * 0.55);
+    gear(g, 18, -48, 12, "#b3b995", -t * 0.97);
     windows(g, -34, -23, 4, "#eec169");
     if (k === "service" || k === "app") {
       cylinder(g, 39, -2, 9, 77, "#655f51", "#a99c7d");
       g.fillStyle = "#b38552";
       g.fillRect(30, -68, 18, 7);
-      for (let i = 0; i < 4; i++) {
-        g.globalAlpha = 0.12 - i * 0.025;
-        ellipse(g, 41 + Math.sin(t * 0.4 + i) * 6 + i * 3, -91 - i * 13, 10 + i * 4, 7 + i * 3, "#c5b994");
-      }
+      ellipse(g, 39, -79, 9, 3.6, "#2a2621");
+      // Live smoke is particle FX on the world canvas; shared static callers keep one faint plume.
+      if (t === 0)
+        for (let i = 0; i < 4; i++) {
+          g.globalAlpha = 0.12 - i * 0.025;
+          ellipse(g, 41 + Math.sin(i) * 6 + i * 3, -91 - i * 13, 10 + i * 4, 7 + i * 3, "#c5b994");
+        }
       g.globalAlpha = 1;
+      markSmoke(g, 39, -80, 1.2);
     }
     if (k === "test") {
       cylinder(g, 36, 2, 12, 43, "#68816d", "#a8bc9b");
@@ -355,7 +367,7 @@ function industrial(g: Pen, k: NodeKind, t: number) {
     "#d2ab55",
     4,
   );
-  gear(g, 51, -13, 5, "#d4c18a");
+  gear(g, 51, -13, 5, "#d4c18a", t * 1.6);
   line(
     g,
     [
@@ -383,7 +395,7 @@ function industrial(g: Pen, k: NodeKind, t: number) {
     4,
   );
 }
-function military(g: Pen, k: NodeKind, allied: boolean) {
+function military(g: Pen, k: NodeKind, allied: boolean, t: number) {
   const roof = allied ? "#d8e0ce" : "#b6b697",
     wall = allied ? "#a5bfc0" : "#8a9673",
     side = allied ? "#587d8b" : "#5c6b53",
@@ -456,6 +468,7 @@ function military(g: Pen, k: NodeKind, allied: boolean) {
     for (let i = 0; i < 2; i++) {
       block(g, -26 + i * 47, 1, 38, 32, 32, roof, wall, side);
       cylinder(g, -26 + i * 47, -30, 13, 25, side, roof);
+      markSmoke(g, -26 + i * 47, -56, 0.9, true);
       poly(
         g,
         [
@@ -568,7 +581,7 @@ function military(g: Pen, k: NodeKind, allied: boolean) {
       );
   }
 }
-function civilization(g: Pen, k: NodeKind) {
+function civilization(g: Pen, k: NodeKind, t: number) {
   ellipse(g, 0, 5, 63, 26, "#7c885a55");
   const stone = "#ddc99b",
     wall = "#bda06f",
@@ -692,7 +705,7 @@ function civilization(g: Pen, k: NodeKind) {
     for (let i = 0; i < 4; i++) {
       g.save();
       g.translate(-8, -68);
-      g.rotate((i * Math.PI) / 2 + 0.35);
+      g.rotate((i * Math.PI) / 2 + 0.35 + t * 0.45);
       poly(
         g,
         [
@@ -732,8 +745,9 @@ function civilization(g: Pen, k: NodeKind) {
       ],
       roof,
     );
-    gear(g, 32, -18, 23, "#a28251");
+    gear(g, 32, -18, 23, "#a28251", t * 0.3);
     cylinder(g, -34, -27, 7, 34, "#8b7a59", "#b1a17c");
+    markSmoke(g, -34, -62, 0.7);
   } else if (k === "external") {
     block(g, 0, 2, 42, 34, 65, stone, wall, side);
     arch(g, 0, 16, 15, 31, "#6e6148");
@@ -760,6 +774,6 @@ function civilization(g: Pen, k: NodeKind) {
 export function drawArchitecture(g: Pen, kind: NodeKind, style: StyleId, t: number) {
   if (style === "moonshot") lunar(g, kind, t);
   else if (style === "factorio") industrial(g, kind, t);
-  else if (style === "civilization") civilization(g, kind);
-  else military(g, kind, style === "red-alert-2");
+  else if (style === "civilization") civilization(g, kind, t);
+  else military(g, kind, style === "red-alert-2", t);
 }

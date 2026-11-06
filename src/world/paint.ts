@@ -126,11 +126,12 @@ export function paintConnections(g: Pen, nodes: PlacedNode[], edges: WorldEdge[]
   g.restore();
 }
 const STATUS = { healthy: "#a9ce94", active: "#92cdd9", attention: "#f2ad6f", unknown: "#b0b6ac" };
-export function paintBuilding(g: Pen, pn: PlacedNode, style: StyleId, selected: boolean, hover: boolean, t: number) {
+/** `liveLight` = the world canvas draws directional shadows itself (fx.ts). */
+export function paintBuilding(g: Pen, pn: PlacedNode, style: StyleId, selected: boolean, hover: boolean, t: number, liveLight = false) {
   const p = PALETTES[style];
   g.save();
   g.translate(pn.x, pn.y);
-  ellipse(g, 17, 14, 69, 25, "#10252745");
+  if (!liveLight) ellipse(g, 17, 14, 69, 25, "#10252745");
   if (selected || hover) {
     const transform = g.getTransform();
     const pixelRatio = typeof window === "undefined" ? 1 : Math.min(2, window.devicePixelRatio || 1);

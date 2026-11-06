@@ -1,5 +1,54 @@
 /** Original vector game art. Coordinates are map units, never repository telemetry. */
 export type Pen = CanvasRenderingContext2D;
+/**
+ * Per-frame directional light used only by the live world canvas. It is neutral by default,
+ * so static previews and history scenes that share this art keep their original look.
+ * `x` is the sun's east/west direction (-1..1); `strength` scales face shading (0..1).
+ */
+const sunlight = { x: 0, strength: 0 };
+export function setSunlight(x: number, strength: number) {
+  sunlight.x = x;
+  sunlight.strength = strength;
+}
+/** Ambient wind clock for flags and sway; amplitude 0 keeps shared callers static. */
+const wind = { t: 0, amp: 0 };
+export function setWind(t: number, amp: number) {
+  wind.t = t;
+  wind.amp = amp;
+}
+function shadeFace(g: Pen, points: number[][], normal: number) {
+  const amount = sunlight.strength * normal * sunlight.x;
+  if (Math.abs(amount) < 0.02) return;
+  g.beginPath();
+  points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+  g.closePath();
+  g.fillStyle = amount > 0 ? `rgba(255,224,176,${(amount * 0.2).toFixed(3)})` : `rgba(8,12,30,${(-amount * 0.34).toFixed(3)})`;
+  g.fill();
+}
+/** Light/smoke anchors recorded while art is drawn into a scratch context (see fx.ts). */
+export interface LightMark { x: number; y: number; w: number; h: number; color: string; lamp: boolean }
+export interface SmokeMark { x: number; y: number; scale: number; steam: boolean }
+let marks: { lights: LightMark[]; smoke: SmokeMark[] } | null = null;
+export function recordMarks(draw: () => void) {
+  const out = { lights: [] as LightMark[], smoke: [] as SmokeMark[] };
+  marks = out;
+  try {
+    draw();
+  } finally {
+    marks = null;
+  }
+  return out;
+}
+export function markLight(g: Pen, x: number, y: number, w: number, h: number, color: string, lamp = false) {
+  if (!marks) return;
+  const p = g.getTransform().transformPoint({ x, y });
+  marks.lights.push({ x: p.x, y: p.y, w, h, color, lamp });
+}
+export function markSmoke(g: Pen, x: number, y: number, scale = 1, steam = false) {
+  if (!marks) return;
+  const p = g.getTransform().transformPoint({ x, y });
+  marks.smoke.push({ x: p.x, y: p.y, scale, steam });
+}
 export function poly(g: Pen, points: number[][], fill: string, stroke?: string) {
   g.beginPath();
   points.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
@@ -31,28 +80,22 @@ export function line(g: Pen, points: number[][], color: string, width = 1) {
   g.stroke();
 }
 export function block(g: Pen, x: number, y: number, w: number, d: number, h: number, roof: string, left: string, right: string) {
-  poly(
-    g,
-    [
-      [x - w / 2, y],
-      [x, y + d / 2],
-      [x, y + d / 2 - h],
-      [x - w / 2, y - h],
-    ],
-    left,
-    "#16262755",
-  );
-  poly(
-    g,
-    [
-      [x, y + d / 2],
-      [x + w / 2, y],
-      [x + w / 2, y - h],
-      [x, y + d / 2 - h],
-    ],
-    right,
-    "#16262755",
-  );
+  const leftFace = [
+    [x - w / 2, y],
+    [x, y + d / 2],
+    [x, y + d / 2 - h],
+    [x - w / 2, y - h],
+  ];
+  const rightFace = [
+    [x, y + d / 2],
+    [x + w / 2, y],
+    [x + w / 2, y - h],
+    [x, y + d / 2 - h],
+  ];
+  poly(g, leftFace, left, "#16262755");
+  shadeFace(g, leftFace, -1);
+  poly(g, rightFace, right, "#16262755");
+  shadeFace(g, rightFace, 1);
   poly(
     g,
     [
@@ -68,7 +111,7 @@ export function block(g: Pen, x: number, y: number, w: number, d: number, h: num
 export function cylinder(g: Pen, x: number, y: number, r: number, h: number, wall: string, roof: string) {
   const shade = g.createLinearGradient(x - r, 0, x + r, 0);
   shade.addColorStop(0, wall);
-  shade.addColorStop(0.45, roof);
+  shade.addColorStop(Math.max(0.1, Math.min(0.9, 0.45 + sunlight.x * sunlight.strength * 0.3)), roof);
   shade.addColorStop(1, wall);
   g.fillStyle = shade;
   g.fillRect(x - r, y - h, r * 2, h);
@@ -197,15 +240,20 @@ export function flag(g: Pen, x: number, y: number, color: string) {
     "#d1d3b4",
     2,
   );
+  const wave = wind.amp * Math.sin(wind.t * 3.1 + x * 0.37),
+    flutter = wind.amp * Math.sin(wind.t * 5.3 + y * 0.21) * 0.6;
   poly(
     g,
     [
       [x, y - 15],
-      [x + 20, y - 10],
-      [x + 17, y],
+      [x + 10, y - 13 + flutter],
+      [x + 20 - Math.abs(wave) * 0.4, y - 10 + wave],
+      [x + 17 - Math.abs(wave) * 0.4, y + wave],
+      [x + 9, y - 1 + flutter],
       [x, y - 3],
     ],
     color,
     "#1b303533",
   );
+  markLight(g, x, y - 15, 2, 2, "#ff5a4a", true);
 }
