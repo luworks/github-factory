@@ -1,8 +1,54 @@
 import { worldStorageRpc, type StorageEnvironment } from "./d1-storage";
+import { historyStorageRpc } from "./history-rpc";
+import { worldCaptureRpc } from "./world-capture-rpc";
+import type { HistoryD1Binding } from "./history-storage";
+
+export interface GatewayEnvironment extends Omit<StorageEnvironment, "WORLDS_DB"> {
+  WORLDS_DB?: StorageEnvironment["WORLDS_DB"] & HistoryD1Binding;
+  FACTORY_ORIGIN: string; FACTORY_GATEWAY_SECRET?: string;
+  COMPANY_SITE?: { fetch(request: Request): Promise<Response> };
+  /** Unset/"" keeps the legacy storage RPC. "4" mounts ONLY the schema4 world
+   * capture RPC at the same path; any other value or invalid key fails closed. */
+  FACTORY_WORLD_CAPTURE_SCHEMA_VERSION?: string; FACTORY_WORLD_CAPTURE_KEY_HEX?: string;
+  /** Exactly "true" mounts the history RPC; otherwise its path is an edge 404. */
+  FACTORY_HISTORY_RPC_ENABLED?: string;
+}
+
+const STORAGE_PATH = "/github-factory/_storage";
+const noStore = { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff" };
+const unavailable = () => new Response(JSON.stringify({ ok: false, code: "WORLD_STORAGE_UNAVAILABLE", error: "The fixed world storage operation is unavailable or rejected.", writeOutcome: "not-started" }), { status: 503, headers: noStore });
+// One non-extractable HMAC key per isolate, re-imported only if the hex changes.
+let captureKey: { hex: string; key: Promise<CryptoKey> } | undefined;
+function importCaptureKey(hex: string) {
+  if (captureKey?.hex !== hex) {
+    const raw = Uint8Array.from(hex.match(/../g)!, v => parseInt(v, 16));
+    const key = crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]);
+    key.catch(() => { if (captureKey?.key === key) captureKey = undefined; });
+    captureKey = { hex, key };
+  }
+  return captureKey.key;
+}
+
+/** Private storage paths never reach the Bun origin. Profile selection is by
+ * explicit Worker configuration only, never by request content. */
+async function storageRoute(request: Request, pathname: string, env: GatewayEnvironment): Promise<Response> {
+  if (pathname === `${STORAGE_PATH}/history`)
+    return env.FACTORY_HISTORY_RPC_ENABLED === "true" ? historyStorageRpc(request, env) : new Response("Not found", { status: 404 });
+  if (pathname !== STORAGE_PATH) return new Response("Not found", { status: 404 });
+  const version = env.FACTORY_WORLD_CAPTURE_SCHEMA_VERSION;
+  if (version === undefined || version === "") return worldStorageRpc(request, env);
+  const hex = env.FACTORY_WORLD_CAPTURE_KEY_HEX ?? "";
+  if (version !== "4" || !/^[a-f0-9]{64}$/.test(hex)) return unavailable();
+  let key: CryptoKey;
+  try { key = await importCaptureKey(hex); } catch { return unavailable(); }
+  const identity = { databaseId: env.FACTORY_STORAGE_DATABASE_ID ?? "", bindingNonce: env.FACTORY_STORAGE_BINDING_NONCE ?? "", epoch: env.FACTORY_MIGRATION_EPOCH ?? "" };
+  return worldCaptureRpc(request, env, { identity, key });
+}
+
 /** Independent path Worker. A prefix route also catches bare-path query strings.
  * No company-site bundle, credentials, SQLite or model code is included. */
 export default {
-  async fetch(request: Request, env: StorageEnvironment & { FACTORY_ORIGIN: string; FACTORY_GATEWAY_SECRET?: string; COMPANY_SITE?: { fetch(request: Request): Promise<Response> } }): Promise<Response> {
+  async fetch(request: Request, env: GatewayEnvironment): Promise<Response> {
     const publicUrl = new URL(request.url);
     if (publicUrl.hostname !== "chaorders.com")
       return new Response("Not found", { status: 404 });
@@ -11,7 +57,7 @@ export default {
     // transparent service binding for adjacent company paths, never recursion.
     if (!(publicUrl.pathname === "/github-factory" || publicUrl.pathname.startsWith("/github-factory/")))
       return env.COMPANY_SITE?.fetch(request) ?? new Response("Not found", { status: 404 });
-    if (publicUrl.pathname === "/github-factory/_storage") return worldStorageRpc(request, env);
+    if (publicUrl.pathname === STORAGE_PATH || publicUrl.pathname.startsWith(`${STORAGE_PATH}/`)) return storageRoute(request, publicUrl.pathname, env);
     // Before retiring a legacy Bun process, close every admission path that can
     // collect or generate. Cached gallery/preview reads remain available until
     // the dedicated connector is stopped to close already accepted slow bodies.

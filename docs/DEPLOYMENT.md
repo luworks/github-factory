@@ -91,3 +91,17 @@ Rollback is explicit; there is no automatic fallback. Retain the previous releas
 
 
 Bridge-only permissions are one-attempt permissions. They bind an expiring grant, unique attempt ID, initial and deployed Worker versions, frozen helpers/artifacts, legacy SQLite runtime and unchanged financial authority. An execution is consumed before mutation; rollback is permitted only for that exact still-active probe-only version with no business migration. A completed rollback permanently revokes it. Starting a full cutover transfers authority and revokes every old bridge rollback path; an old bridge grant cannot bypass HOLD, drain or D1 delta reconciliation after runtime writes. Recovery from an unknown state requires a separately reviewed recovery decision.
+
+### Gateway storage routing profiles
+
+`deploy/gateway.ts` answers every `/github-factory/_storage` path at the edge; none reaches the Bun origin. Profile selection uses explicit Worker configuration only, never request content:
+
+| Worker setting | `/_storage` | `/_storage/history` |
+| --- | --- | --- |
+| `FACTORY_WORLD_CAPTURE_SCHEMA_VERSION` unset or empty (default) | legacy schema2 storage RPC, unchanged | — |
+| `FACTORY_WORLD_CAPTURE_SCHEMA_VERSION=4` plus Secret `FACTORY_WORLD_CAPTURE_KEY_HEX` (64 lowercase hex) | schema4 world capture RPC only; identity comes from `FACTORY_STORAGE_DATABASE_ID`, `FACTORY_STORAGE_BINDING_NONCE` and `FACTORY_MIGRATION_EPOCH`, and is then checked against the stored D1 authority/key tag | — |
+| any other version value or a malformed key | `503 WORLD_STORAGE_UNAVAILABLE` before any SQL; no legacy fallback | — |
+| `FACTORY_HISTORY_RPC_ENABLED=true` (exact) | — | history RPC |
+| otherwise | — | `404` |
+
+Other `/_storage/*` subpaths return `404`. The capture key must equal the server-only `MOONSHOT_WORLD_CAPTURE_KEY_HEX`. It must be a Worker Secret, never a Variable. Enabling schema4 requires schema4 migrations and a provisioned `world_capture_authority` row. Profile changes are deployment changes: they follow the physical-binding, rollback and maintenance-window gates above. Synthetic routing tests do not prove a live D1 binding.
