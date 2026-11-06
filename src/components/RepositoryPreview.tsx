@@ -66,10 +66,19 @@ function paintPreviewMotion(
   g.restore();
 }
 
+/** Pointer offset shared by a card's tilt handler and its canvas (write-only from the card). */
+export interface PreviewTilt { x: number; y: number }
+const easeOutBack = (t: number) => { const c = 1.7; return t <= 0 ? 0 : t >= 1 ? 1 : 1 + (c + 1) * (t - 1) ** 3 + c * (t - 1) ** 2; };
+
 // Share WorldCanvas's procedural renderer, with a small, noninteractive card camera.
 // The shared animation clock caps work and pauses completely under reduced motion.
-function MiniWorldCanvas({ data, style }: { data: RepositoryPreviewData; style: StyleId }) {
+// On first sight the districts rise from the ground (staggered), then the finished
+// city is baked into one cached bitmap so steady-state frames are a single blit
+// plus the light sweep and survey signals.
+function MiniWorldCanvas({ data, style, tilt }: { data: RepositoryPreviewData; style: StyleId; tilt?: PreviewTilt }) {
   const canvas = useRef<HTMLCanvasElement>(null);
+  const tiltRef = useRef(tilt);
+  tiltRef.current = tilt;
   useEffect(() => {
     const cv = canvas.current;
     const g = cv?.getContext("2d");
@@ -77,20 +86,48 @@ function MiniWorldCanvas({ data, style }: { data: RepositoryPreviewData; style: 
     const placed = layoutWorld(data.nodes.slice(0, 30), style).toSorted((a, b) => a.y - b.y);
     const edges = data.edges.slice(0, 96);
     const bounds = mapBounds(placed);
-    const ground = document.createElement("canvas");
-    const bg = ground.getContext("2d");
-    if (!bg) return;
+    const ground = document.createElement("canvas"), terrain = document.createElement("canvas");
+    const bg = ground.getContext("2d"), tg = terrain.getContext("2d");
+    if (!bg || !tg) return;
     let width = 1, height = 1, scale = 1, x = 0, y = 0;
     let stopAnimation = () => {};
+    let introStart: number | null = null, baked = false;
+    const INTRO = 0.9 + placed.length * 0.06;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const paintCity = (target: CanvasRenderingContext2D, progress: (index: number) => number) => {
+      for (const [index, pn] of placed.entries()) {
+        const rise = progress(index);
+        if (rise <= 0) continue;
+        target.save();
+        target.translate(pn.x, pn.y + 20); target.scale(1, rise); target.translate(-pn.x, -(pn.y + 20));
+        paintBuilding(target, pn, style, false, false, 0);
+        target.restore();
+      }
+    };
     const draw = (time: number) => {
       g.setTransform(1, 0, 0, 1, 0, 0);
       g.fillStyle = PALETTES[style].ground;
       g.fillRect(0, 0, width, height);
-      const driftX = time ? Math.sin(time * 0.7) * 2.5 : 0;
-      const driftY = time ? Math.cos(time * 0.55) * 1.5 : 0;
-      g.drawImage(ground, driftX, driftY);
-      if (time > 0) paintPreviewMotion(g, placed, edges, style, time, scale, x + driftX, y + driftY);
+      const lean = tiltRef.current;
+      const driftX = time ? Math.sin(time * 0.7) * 2.5 - (lean?.x ?? 0) * 7 : 0;
+      const driftY = time ? Math.cos(time * 0.55) * 1.5 - (lean?.y ?? 0) * 4 : 0;
+      if (time > 0 && !baked) {
+        if (introStart === null) introStart = time;
+        const elapsed = time - introStart;
+        g.drawImage(terrain, driftX, driftY);
+        g.setTransform(scale, 0, 0, scale, x + driftX, y + driftY);
+        paintCity(g, (index) => easeOutBack(Math.min(1, Math.max(0, (elapsed - index * 0.06) / 0.55))));
+        g.setTransform(1, 0, 0, 1, 0, 0);
+        if (elapsed > INTRO) baked = true;
+      } else g.drawImage(ground, driftX, driftY);
+      if (time > 0) {
+        // A slow sunlight band sweeps the miniature (illustration, not activity).
+        const sweep = ((time * 0.12) % 1.8 - 0.4) * width;
+        const band = g.createLinearGradient(sweep - 70, 0, sweep + 70, height * 0.5);
+        band.addColorStop(0, "rgba(255,255,255,0)"); band.addColorStop(0.5, "rgba(255,255,240,0.12)"); band.addColorStop(1, "rgba(255,255,255,0)");
+        g.fillStyle = band; g.fillRect(0, 0, width, height);
+        paintPreviewMotion(g, placed, edges, style, time, scale, x + driftX, y + driftY);
+      }
     };
     const updateMotion = () => {
       stopAnimation();
@@ -102,18 +139,20 @@ function MiniWorldCanvas({ data, style }: { data: RepositoryPreviewData; style: 
       const rect = cv.getBoundingClientRect();
       width = Math.max(1, Math.min(720, Math.round(rect.width * 1.5)));
       height = Math.max(1, Math.min(320, Math.round(rect.height * 1.5)));
-      cv.width = ground.width = width;
-      cv.height = ground.height = height;
-      scale = Math.min(width / bounds.width, (height - 25) / bounds.height) * 0.9;
+      cv.width = ground.width = terrain.width = width;
+      cv.height = ground.height = terrain.height = height;
+      scale = Math.min(width / bounds.width, (height - 10) / bounds.height) * 0.92;
       x = width / 2 - (bounds.x + bounds.width / 2) * scale;
-      y = height / 2 - 40 - (bounds.y + bounds.height / 2) * scale;
-      bg.setTransform(1, 0, 0, 1, 0, 0);
-      bg.fillStyle = PALETTES[style].ground;
-      bg.fillRect(0, 0, width, height);
-      bg.setTransform(scale, 0, 0, scale, x, y);
-      paintTerrain(bg, style, placed, data.fullName);
-      paintConnections(bg, placed, edges, style, 0, false);
-      for (const pn of placed) paintBuilding(bg, pn, style, false, false, 0);
+      y = height / 2 - (bounds.y + bounds.height / 2) * scale;
+      for (const layer of [bg, tg]) {
+        layer.setTransform(1, 0, 0, 1, 0, 0);
+        layer.fillStyle = PALETTES[style].ground;
+        layer.fillRect(0, 0, width, height);
+        layer.setTransform(scale, 0, 0, scale, x, y);
+        paintTerrain(layer, style, placed, data.fullName);
+        paintConnections(layer, placed, edges, style, 0, false);
+      }
+      paintCity(bg, () => 1);
       draw(0);
     };
     const observer = new ResizeObserver(resize);
@@ -127,13 +166,13 @@ function MiniWorldCanvas({ data, style }: { data: RepositoryPreviewData; style: 
       observer.disconnect();
       motion.removeEventListener("change", updateMotion);
       document.removeEventListener("visibilitychange", updateMotion);
-      ground.width = ground.height = 0;
+      ground.width = ground.height = terrain.width = terrain.height = 0;
     };
   }, [data, style]);
   return <canvas ref={canvas} className="repository-preview-canvas" data-testid="repository-preview-canvas" aria-hidden="true" />;
 }
 
-export function RepositoryPreview({ fullName, style, enabled = true }: { fullName: string; style: StyleId; enabled?: boolean }) {
+export function RepositoryPreview({ fullName, style, enabled = true, tilt }: { fullName: string; style: StyleId; enabled?: boolean; tilt?: PreviewTilt }) {
   const box = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -174,8 +213,10 @@ export function RepositoryPreview({ fullName, style, enabled = true }: { fullNam
     : ("Unknown · no cached map");
   return (
     <div ref={box} className={`repository-preview preview-${style}`} data-preview-state={failed ? "unavailable" : state || "loading"}>
-      {mapped && visible && <MiniWorldCanvas data={data!} style={style} />}
-      {!mapped && <div className="repository-preview-empty"><span>{label}</span><small>{"No automatic collection or model calls"}</small></div>}
+      <div className="repository-preview-stage">
+        {mapped && visible && <MiniWorldCanvas data={data!} style={style} tilt={tilt} />}
+        {!mapped && <div className="repository-preview-empty">{!data && near && !failed && <span className="preview-loader" aria-hidden="true"><i /><i /><i /></span>}<span>{label}</span><small>{"No automatic collection or model calls"}</small></div>}
+      </div>
       {mapped && <div className="repository-preview-caption">
         <span>{label} · {data!.tree === "truncated" ? ("partial tree") : data!.github !== "ok" ? ("partial upstream evidence") : ("GitHub facts")}</span>
         <span>{data!.nodes.length}/{data!.totalNodes} {"districts"} · {data!.edges.length}/{data!.totalEdges} {"links"} · {`${data!.nodes.filter((n) => n.confidence === "observed").length} observed / ${data!.nodes.filter((n) => n.confidence === "inferred").length} inferred`}</span>

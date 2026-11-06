@@ -1,5 +1,13 @@
+import { Link } from "@tanstack/react-router";
+import { cachedWorldReady, worldIdentity } from "../evidence/captured";
+import { readAtlasSession, validatedReturnToken } from "../atlas/session";
+import { noteExploration, subscribeExploration, explorationFlags, useProgress } from "../progression/session";
+import "../atlas/atlas.css";
+import { flagSaved } from "../progression/progress-store";
+import { HistoryReplay } from "./HistoryReplay";
+import { SourceChallenge } from "./SourceChallenge";
 import { appPath } from "../base-path";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   ArrowLeft,
@@ -35,7 +43,7 @@ import {
 import type { BudgetStatus, StyleId, WorldNode, WorldSnapshot } from "../contracts";
 import { WorldCanvas } from "../world/WorldCanvas";
 import { STYLES } from "../client/demo";
-import { clock, enrichWorld, getBudget, getWorld, refreshWorld, shortNumber } from "../client/api";
+import { clock, enrichWorld, getBudget, getCachedWorld, getWorld, refreshWorld, shortNumber } from "../client/api";
 import { Brand, External } from "./shared";
 /** Keep source text intact while offering natural identifier wrapping points. */
 function identifierBreaks(value: string) {
@@ -62,10 +70,19 @@ function ciSummary(w: WorldSnapshot) {
 export function ExplorerPage({
   owner,
   repo,
+  readMode = "legacy",
 }: {
   owner: string;
   repo: string;
+  readMode?: "legacy" | "cached" | "invalid";
 }) {
+  const progress = useProgress();
+  const [atlasToken,setAtlasToken] = useState<string|null>(null), [,setProgressRevision] = useState(0);
+  const loadGeneration = useRef(0);
+  const cachedOnly = readMode === "cached";
+  const [sourceVerified,setSourceVerified] = useState(false);
+  const [showReplay,setShowReplay] = useState(false);
+  const [motionPaused,setMotionPaused] = useState(false), [challengeOpen,setChallengeOpen] = useState(false);
   const [world, setWorld] = useState<WorldSnapshot | null>(null),
     [error, setError] = useState<string | null>(null),
     [refreshing, setRefreshing] = useState(false),
@@ -83,41 +100,47 @@ export function ExplorerPage({
   }, []);
   const load = useCallback(
     async (refresh = false) => {
+      const generation = ++loadGeneration.current;
       if (refresh) setRefreshing(true);
       try {
-        const next = await (refresh ? refreshWorld(owner, repo) : getWorld(owner, repo));
+        if (readMode === "invalid") throw new Error("Invalid exploration mode. Return to Atlas to choose a cached world.");
+        const next = await (cachedOnly ? getCachedWorld(owner, repo) : refresh ? refreshWorld(owner, repo) : getWorld(owner, repo));
+        if (generation !== loadGeneration.current) return;
+        if (cachedOnly && !cachedWorldReady(next)) throw new Error("This cached capture cannot be verified for exploration.");
         setWorld(next);
+        setSourceVerified(true);
         setError(null);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "The repository could not be loaded.");
+        if (generation === loadGeneration.current) { setSourceVerified(false); setError(e instanceof Error ? e.message : "The repository could not be loaded."); }
       } finally {
-        setRefreshing(false);
+        if (generation === loadGeneration.current) setRefreshing(false);
       }
     },
-    [owner, repo],
+    [owner, repo, readMode, cachedOnly],
   );
   useEffect(() => {
     let active = true;
-    getWorld(owner, repo)
-      .then((w) => {
-        if (active) setWorld(w);
-      })
-      .catch((e) => {
-        if (active) setError(e.message);
-      });
-    getBudget()
+    setWorld(null); setSelected(null); setSourceVerified(false); setShowReplay(false);
+    void load();
+    if (!cachedOnly && readMode !== "invalid")     getBudget()
       .then((b) => {
         if (active) setBudget(b);
       })
       .catch(() => {});
-    const timer = setInterval(() => {
+    const timer = readMode === "legacy" ? setInterval(() => {
       if (active && document.visibilityState === "visible") void load();
-    }, 60000);
+    }, 60000) : undefined;
     return () => {
       active = false;
-      clearInterval(timer);
+      ++loadGeneration.current;
+      if (timer) clearInterval(timer);
     };
-  }, [owner, repo, load]);
+  }, [owner, repo, load, cachedOnly, readMode]);
+  useEffect(() => {
+    if (!cachedOnly) return;
+    setAtlasToken(validatedReturnToken(window.location.search,readAtlasSession().value));
+    return subscribeExploration(()=>setProgressRevision(x=>x+1));
+  },[cachedOnly]);
   const changeStyle = (s: StyleId) => {
     setStyle(s);
     const url = new URL(window.location.href);
@@ -149,7 +172,9 @@ export function ExplorerPage({
     stale = world ? Date.now() > world.refreshAfter : false;
   const share = async () => {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      const shareUrl = new URL(window.location.href);
+      shareUrl.searchParams.delete("atlasReturn"); shareUrl.searchParams.delete("from");
+      await navigator.clipboard.writeText(shareUrl.href);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch {
@@ -161,6 +186,8 @@ export function ExplorerPage({
     <div className={`explorer explorer-${style}`}>
       <header className="explorer-header">
         <Brand compact />
+        {cachedOnly && <button className="share-button" onClick={() => setMotionPaused(x=>!x)} aria-pressed={motionPaused}>{motionPaused ? "Resume motion" : "Pause motion"}</button>}
+        {cachedOnly && <Link className="explorer-atlas-back" to="/atlas" search={atlasToken ? {atlasReturn:atlasToken} : {home:"1"}} preload={false}>Back to Atlas</Link>}
         <span className="breadcrumb-divider">/</span>
         <a className="repo-breadcrumb" href={world?.repo.url ?? `https://github.com/${owner}/${repo}`} target="_blank" rel="noreferrer">
           <Github size={15} />
@@ -178,6 +205,7 @@ export function ExplorerPage({
           </button>
         </div>
       </header>
+      {cachedOnly && world && <div className="explorer-visit-status">{explorationFlags(world.repo.fullName.toLowerCase()).visited ? (flagSaved(progress, world.repo.fullName.toLowerCase(), "visited") ? "Visited on this device" : "Visited this session — not saved") : "Rendering cached world"} · No Exploration star awarded for entry. <button className="source-challenge-toggle" aria-pressed={showReplay} onClick={() => {setShowReplay(x=>!x);setTab("world");}}>{showReplay ? "Close commit replay" : "Replay captured commits"}</button> <button className="source-challenge-toggle" aria-pressed={challengeOpen} onClick={() => setChallengeOpen(x=>!x)}>{challengeOpen ? "Hide source challenge" : "Show source challenge"}</button></div>}
       {!world ? (
         <main className="world-loading">
           {error ? (
@@ -320,7 +348,8 @@ export function ExplorerPage({
             <section className="world-stage">
               {tab === "world" ? (
                 <>
-                  <WorldCanvas world={world} style={style} selectedId={selectedId} onSelect={select} />
+                  <WorldCanvas paused={motionPaused || showReplay} world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
+                  {showReplay && cachedOnly && <HistoryReplay world={world} available={sourceVerified}/>}
                   <div className="stage-heading">
                     <span className="stage-eyebrow">{styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
                     <h1>
@@ -530,7 +559,8 @@ export function ExplorerPage({
                 ))}
               </div>
             </section>
-            <aside className="inspector">
+            <aside className={`inspector${challengeOpen ? " challenge-open" : ""}`}>
+              {cachedOnly && <SourceChallenge world={world} available={sourceVerified} onSelect={select}/>}
               <div className="inspector-title">
                 <span>{selected ? ("DISTRICT INTELLIGENCE") : "WORLD INTELLIGENCE"}</span>
                 {selected && (

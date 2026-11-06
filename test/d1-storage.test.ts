@@ -320,3 +320,47 @@ test("SYNTHETIC an unrelated existing migration guard prevents every business/pr
     expect((b.db.query("SELECT migration_id FROM migration_guards").get() as { migration_id: string }).migration_id).toBe("unrelated-guard");
   } finally { b.db.close(); }
 });
+
+async function proofFixture() {
+  const { default: probe, STORAGE_PROBE_DATABASE, STORAGE_PROBE_HOST, STORAGE_PROBE_PATH } = await import("../deploy/storage-probe");
+  const b = binding(); b.db.query("UPDATE storage_identity SET database_uuid=?").run(STORAGE_PROBE_DATABASE);
+  Object.assign(b.env,{FACTORY_STORAGE_MODE:"probe-only",FACTORY_STORAGE_DATABASE_ID:STORAGE_PROBE_DATABASE,FACTORY_STORAGE_BINDING_NONCE:expectedIdentity.bindingNonce,FACTORY_ADMISSION_FENCE:""});
+  const sql:string[]=[],prepare=b.bound.prepare.bind(b.bound);b.bound.prepare=(text:string)=>{sql.push(text);return prepare(text);};
+  const url=`https://${STORAGE_PROBE_HOST}${STORAGE_PROBE_PATH}`;
+  const request=(body:unknown,auth=secret)=>new Request(url,{method:"POST",headers:{"content-type":"application/json","x-factory-storage-key":auth},body:JSON.stringify(body)});
+  return {...b,probe,url,sql,request};
+}
+test("SYNTHETIC isolated probe wrapper fixes exact host/path/method and authenticates before body or any SQL",async()=>{
+ const b=await proofFixture();try{
+  for(const url of ["https://evil.example/github-factory/_storage-probe",b.url+"?op=status",b.url+"/",b.url.replace("https:","http:"),b.url.replace(".dev/",".dev:8443/"),b.url.replace("_storage-probe","_storage")])expect((await b.probe.fetch(new Request(url,{method:"POST",body:"{}"}),b.env)).status).toBe(404);
+  for(const method of ["GET","HEAD","PUT","DELETE","OPTIONS"])expect((await b.probe.fetch(new Request(b.url,{method}),b.env)).status).toBe(404);
+  let reads=0;const stream=new ReadableStream({pull(){reads++;throw Error("SYNTHETIC body must not be read");}},{highWaterMark:0});expect((await b.probe.fetch(new Request(b.url,{method:"POST",headers:{"content-type":"application/json"},body:stream}),b.env)).status).toBe(403);expect(reads).toBe(0);expect(b.sql).toEqual([]);
+ }finally{b.db.close();}
+});
+test("SYNTHETIC proof-only mode/profile/nonce/body policy rejects every unused operation before SQL",async()=>{
+ const b=await proofFixture();try{
+  for(const op of ["put","alias","delete","migrationImport","migrationSnapshot","getMany","summaries","sql"])expect((await b.probe.fetch(b.request({op}),b.env)).status).toBe(403);
+  for(const action of ["write","read","delete","unknown",undefined])expect((await b.probe.fetch(b.request({op:"probe",action,nonce:"a".repeat(32)}),b.env)).status).toBe(403);
+  for(const body of [{op:"probe",action:"rollback",nonce:"bad"},{op:"probe",action:"rollback",nonce:"a".repeat(32),sql:"SELECT 1"},{op:"status",profile:"default"},{op:"status",url:"https://evil.example"}])expect((await b.probe.fetch(b.request(body),b.env)).status).toBe(403);
+  for(const mode of [undefined,"worlds","proof-only",""]){expect((await b.probe.fetch(b.request({op:"status"}),{...b.env,FACTORY_STORAGE_MODE:mode})).status).toBe(503);}
+  for(const patch of [{FACTORY_STORAGE_DATABASE_ID:databaseId},{FACTORY_STORAGE_BINDING_NONCE:undefined},{FACTORY_ADMISSION_FENCE:expectedIdentity.epoch}])expect((await b.probe.fetch(b.request({op:"status"}),{...b.env,...patch})).status).toBe(503);
+  const headers={"content-type":"application/json","x-factory-storage-key":secret};for(const body of ["x".repeat(4097),new Uint8Array([255])])expect((await b.probe.fetch(new Request(b.url,{method:"POST",headers,body}),b.env)).status).toBe(400);
+  expect((await b.probe.fetch(new Request(b.url,{method:"POST",headers:{...headers,"content-length":"4097"},body:'{"op":"status"}'}),b.env)).status).toBe(400);const locked=b.request({op:"status"}),owner=locked.body!.getReader();expect((await b.probe.fetch(locked,b.env)).status).toBe(400);await owner.cancel();expect(b.sql).toEqual([]);
+ }finally{b.db.close();}
+});
+test("SYNTHETIC strict standalone rollback reuses write control/exact duplicate/absent proof and preserves all business rows",async()=>{
+ const b=await proofFixture();try{
+  const status=await(await b.probe.fetch(b.request({op:"status"}),b.env)).json();expect(status.identity).toMatchObject({databaseId:b.env.FACTORY_STORAGE_DATABASE_ID,bindingNonce:expectedIdentity.bindingNonce,admissionFenced:false});expect(status.result.schemaVersion).toBe(2);
+  const result=await(await b.probe.fetch(b.request({op:"probe",action:"rollback",nonce:"a".repeat(32)}),b.env)).json();expect(result.result).toEqual({batchRejected:true,rolledBack:true,syntheticRowAbsent:true,writeControlVerified:true,expectedDuplicateConstraint:true});
+  for(const table of ["worlds","world_aliases","storage_provenance","migration_guards","migration_sentinels"])expect((b.db.query(`SELECT COUNT(*) n FROM ${table}`).get() as {n:number}).n).toBe(0);
+ }finally{b.db.close();}
+});
+test("SYNTHETIC proof identity/schema/other batch errors and failed cleanup cannot report rollback success",async()=>{
+ for(const failure of ["nonce","schema","transport","wrong-constraint","cleanup"]){const b=await proofFixture();try{
+  if(failure==="nonce")b.env.FACTORY_STORAGE_BINDING_NONCE="f".repeat(32);
+  if(failure==="schema")b.db.query("DELETE FROM schema_migrations WHERE version=2").run();
+  if(failure==="transport"||failure==="wrong-constraint")b.bound.batch=async()=>{throw Error(failure==="transport"?"SYNTHETIC network unavailable":"UNIQUE constraint failed: worlds.repo");};
+  if(failure==="cleanup"){const prepare=b.bound.prepare.bind(b.bound);b.bound.prepare=(sql:string)=>sql.startsWith("DELETE FROM migration_sentinels")?({...prepare(sql),bind(){return this;},async run(){return{success:false};}}):prepare(sql);}
+  expect((await b.probe.fetch(b.request({op:"probe",action:"rollback",nonce:"a".repeat(32)}),b.env)).status).toBe(503);if(failure==="nonce"||failure==="schema")expect(b.sql.some(sql=>sql.startsWith("INSERT"))).toBe(false);
+ }finally{b.db.close();}}
+});

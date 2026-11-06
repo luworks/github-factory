@@ -1,0 +1,11 @@
+.history-replay { position:absolute; z-index:12; inset:100px 16px 90px; max-height:65vh; overflow:auto; background:var(--geist-map-surface); color:var(--geist-map-fg); border:1px solid var(--geist-map-border); border-radius:8px; padding:16px; font-size:13px; line-height:1.55; overflow-wrap:anywhere; }
+.history-replay h2 { margin:0 0 8px; font-size:18px; }
+.history-replay p { margin:8px 0; }
+.history-replay code { font-size:12px; }
+.history-replay a { display:inline-block; color:inherit; text-decoration:underline; min-height:44px; }
+.history-marker { border:1px solid var(--geist-map-border); border-left:4px solid var(--geist-map-fg); border-radius:4px; padding:12px; }
+.history-controls { display:flex; flex-wrap:wrap; gap:8px; }
+.history-replay button,.history-replay select { min-height:44px; padding:8px 12px; color:inherit; background:var(--geist-map-surface); border:1px solid var(--geist-map-border); border-radius:4px; }
+.history-replay label { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.history-replay input[type=range] { min-width:0; flex:1; min-height:44px; }
+@media(max-width:600px) { .history-replay { inset:12px 8px 100px; max-height:58vh; padding:12px; } }

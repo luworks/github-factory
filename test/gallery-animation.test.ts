@@ -17,11 +17,11 @@ test("gallery clock bounds paints, serves every visible subscriber and stops its
   try {
     expect(queued.size).toBe(1);
     advance(100);
-    expect(paints.reduce((a, b) => a + b, 0)).toBe(4);
+    expect(paints.reduce((a, b) => a + b, 0)).toBe(6);
     advance(130);
-    expect(paints.reduce((a, b) => a + b, 0)).toBe(4);
+    expect(paints.reduce((a, b) => a + b, 0)).toBe(6);
     advance(200);
-    expect(paints.reduce((a, b) => a + b, 0)).toBe(8);
+    expect(paints.reduce((a, b) => a + b, 0)).toBe(12);
     expect(paints.every((count) => count > 0)).toBe(true);
     for (const unsubscribe of stop) unsubscribe();
     expect(queued.size).toBe(0);

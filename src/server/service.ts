@@ -1,27 +1,27 @@
 import { CURATED_PROJECTS } from "../catalog";
 import type { FeaturedProject, WorldSnapshot } from "../contracts";
 import { analyzeCollection } from "./analysis";
-import { getConfig } from "./config";
-import { GitHubClient, GitHubError, parseRepo, type RepoCollection, type RepoRef } from "./github";
-import { WorldStore, worldStorePath } from "./store";
-import { PublicGitHubQuota } from "./public-quota";
-import { join } from "node:path";
+import { GitHubError, parseRepo, createCollectionObservation, takePrivateRepositoryObservation, type CollectionObservation, type RepoCollection, type RepoRef } from "./github";
+import { getWorldResources } from "./world-resources";
 import { isRenderableWorld } from "./world-readiness";
-import { D1WorldStore } from "./d1-store";
-import type { CachedWorld, SnapshotStore, WorldStorageStatus } from "./world-storage";
+import { WorldStorageError, type CachedWorld, type SnapshotStore, type WorldStorageStatus, type PublicCaptureGeneration } from "./world-storage";
 import { activePublicAnalyses, migrationHeld, requireAnalysisOpen } from "./runtime-activity";
+import { createWorldLifecycle } from "./world-lifecycle";
 
 interface Collector {
-  collect(ref: RepoRef): Promise<RepoCollection>;
+  collect(ref: RepoRef, context?: CollectionObservation): Promise<RepoCollection>;
 }
 
 /** Injectable service factory keeps tests deterministic and prevents all network access on import. */
 export function createWorldService(options: { collector: Collector; store: SnapshotStore; now?: () => number; maxConcurrent?: number }) {
   const now = options.now || Date.now;
+  // One original store owns reads, writes and the bound lifetime observation.
+  const store = options.store;
   const inflight = new Map<string, Promise<WorldSnapshot>>();
   const cooldown = new Map<string, { until: number; error: GitHubError }>();
   let active = 0;
   const maxConcurrent = Math.max(1, Math.min(3, options.maxConcurrent ?? 2));
+  const lifecycle = createWorldLifecycle(store);
   const stale = (world: WorldSnapshot, error: GitHubError): WorldSnapshot => ({
     ...world,
     health: { ...world.health, github: "error" },
@@ -55,43 +55,70 @@ export function createWorldService(options: { collector: Collector; store: Snaps
   };
   const getCachedWorld = async (input: string): Promise<WorldSnapshot | null> => {
     const ref = parseRepo(input);
-    return cachedSnapshot(await options.store.get(ref.fullName, now()));
+    return cachedSnapshot(await store.get(ref.fullName, now(), { readOnly: true }));
   };
-  const loadWorld = async (input: string, settings?: { refresh?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
+  const loadWorld = async (input: string, settings?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => {
     const ref = parseRepo(input),
       key = ref.fullName.toLowerCase();
-    const cached = await options.store.get(key, now());
+    const cached = await store.get(key, now());
+    const authority = store.publicCaptures;
+    if (authority && ["begin", "assert", "commit", "revoke"].some(method => typeof authority[method as keyof typeof authority] !== "function")) throw new WorldStorageError();
+    const fallback = async (error: GitHubError, generation?: PublicCaptureGeneration) => {
+      if (!cached) throw error;
+      if (authority && generation) await authority.assert(generation);
+      // Cached variables predate asynchronous work. Re-read the authority so a
+      // concurrent revocation cannot turn a network/admission error into a leak.
+      const current = await store.get(key, now(), { readOnly: true });
+      if (!current) throw new WorldStorageError();
+      return stale(current.world, error);
+    };
     // Navigation is cache-first, including historical snapshots. It must never
     // wait on GitHub, consume collection allowance, or start background work.
     if (cached && !settings?.refresh) return cachedSnapshot(cached)!;
     if (inflight.has(key)) return inflight.get(key)!;
     // Forced refresh cannot turn one browser into an unbounded GitHub request loop.
     if (cached && settings?.refresh && now() - Date.parse(cached.world.collectedAt) < 15_000) return cached.world;
+    // A late provider mutation cannot route a newly present observer through
+    // the legacy path captured by this factory. Recompose behind a real handoff.
+    if (!lifecycle && "observeSettlement" in store) throw new WorldStorageError();
     requireAnalysisOpen();
     const failure = cooldown.get(key);
     if (failure && failure.until > now()) {
-      if (cached) return stale(cached.world, failure.error);
+      if (cached) return fallback(failure.error);
       throw failure.error;
     }
     if (active >= maxConcurrent) {
       const error = new GitHubError("WORLD_BUSY", 429, "Repository collection slots are busy; retry shortly.", 5);
-      if (cached) return stale(cached.world, error);
+      if (cached) return fallback(error);
       throw error;
     }
-    // Admission is before any collector work, after free cache/singleflight reads.
-    // Rejection must not create a repository-wide cooldown for other clients.
-    try { settings?.admit?.(); }
-    catch (error) { if (cached) return stale(cached.world, asError(error)); throw error; }
     active++;
-    const promise = (async () => {
+    // Install singleflight before awaiting an asynchronous generation authority.
+    let publish!: (world: WorldSnapshot) => void, fail!: (error: unknown) => void;
+    const promise = new Promise<WorldSnapshot>((resolve, reject) => { publish = resolve; fail = reject; });
+    inflight.set(key, promise);
+    const collect = async () => {
+      let generation: PublicCaptureGeneration | undefined, collectionContext: CollectionObservation | undefined, admitted = false;
       try {
-        const collected = await options.collector.collect(ref);
+        requireAnalysisOpen();
+        if (authority) {
+          const pending = authority.begin(key, { explicitRevalidation: settings?.explicitRevalidation === true || settings?.refresh === true });
+          generation = pending && typeof (pending as Promise<PublicCaptureGeneration>).then === "function" ? await pending : pending as PublicCaptureGeneration;
+          if (!generation || generation.repo !== key || !Number.isSafeInteger(generation.sequence) || generation.sequence < 0) throw new WorldStorageError();
+        }
+        // A denied legacy GET must not spend collection allowance or fetch.
+        settings?.admit?.(); admitted = true;
+        collectionContext = createCollectionObservation(key, generation);
+        const collected = await options.collector.collect(ref, collectionContext);
 
         const world = analyzeCollection(collected);
         const expiresAt = now() + 90_000;
         world.refreshAfter = expiresAt;
-        await options.store.put(world, 90_000, now());
-        await options.store.alias?.(key, world.repo.fullName);
+        if (authority) await authority.commit(generation!, world, 90_000, now());
+        else { // Legacy injectable adapters; D1 privacy is NOT advertised ready.
+          await store.put(world, 90_000, now());
+          await store.alias?.(key, world.repo.fullName);
+        }
         cooldown.set(key, {
           until: now() + 15_000,
           error: new GitHubError("REFRESH_COOLDOWN", 429, "Wait briefly before refreshing.", 15),
@@ -100,29 +127,35 @@ export function createWorldService(options: { collector: Collector; store: Snaps
       } catch (error) {
         if ((error as { code?: string })?.code === "WORLD_STORAGE_UNAVAILABLE") throw error;
         const typed = asError(error);
+        if (!admitted) { if (cached) return await fallback(typed, generation); throw error; }
         cooldown.set(key, { until: now() + Math.max(15, Math.min(3600, typed.retryAfter || 15)) * 1000, error: typed });
-        if (typed.code === "PUBLIC_ONLY") {
-          await options.store.delete?.(key);
+        if (typed.code === "PUBLIC_ONLY" && typed.status === 403) {
+          if (authority) await authority.revoke(key, generation, generation ? takePrivateRepositoryObservation(error, collectionContext, key, generation) : undefined);
+          else await store.delete?.(key);
           throw typed;
         }
-        if (cached) return stale(cached.world, typed);
+        if (cached) return await fallback(typed, generation);
         throw typed;
       } finally {
-        active--;
-        inflight.delete(key);
-        if (cooldown.size > 200) {
-          for (const [id, value] of cooldown) if (value.until <= now()) cooldown.delete(id);
-          if (cooldown.size > 200) cooldown.delete(cooldown.keys().next().value!);
-        }
+        if (!lifecycle) releaseSlot();
       }
-    })();
-    inflight.set(key, promise);
+    };
+    const releaseSlot = () => {
+      active--;
+      inflight.delete(key);
+      if (cooldown.size > 200) {
+        for (const [id, value] of cooldown) if (value.until <= now()) cooldown.delete(id);
+        if (cooldown.size > 200) cooldown.delete(cooldown.keys().next().value!);
+      }
+    };
+    const work = lifecycle ? lifecycle.run(collect, releaseSlot) : collect();
+    void work.then(publish, fail);
     return promise;
   };
   const listFeatured = async (): Promise<FeaturedProject[]> => {
     const keys = CURATED_PROJECTS.map((project) => project.fullName.toLowerCase());
-    const summaries = options.store.summaries ? await options.store.summaries(keys, now()) :
-      (await Promise.all(keys.map(async (key) => { const entry = await options.store.get(key, now()); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
+    const summaries = store.summaries ? await store.summaries(keys, now()) :
+      (await Promise.all(keys.map(async (key) => { const entry = await store.get(key, now(), { readOnly: true }); return entry ? { key, repo: entry.world.repo, collectedAt: entry.world.collectedAt, expiresAt: entry.expiresAt, ready: isRenderableWorld(entry.world, now()) } : null; }))).filter((row) => row !== null);
     const byKey = new Map(summaries.map((row) => [row.key, row]));
     return CURATED_PROJECTS.map((project) => {
       const cached = byKey.get(project.fullName.toLowerCase());
@@ -138,29 +171,25 @@ export function createWorldService(options: { collector: Collector; store: Snaps
         : { ...project };
     });
   };
-  const storageStatus = async (): Promise<WorldStorageStatus | { backend: "injected" }> => options.store.status ? options.store.status() : { backend: "injected" };
+  const storageStatus = async (): Promise<WorldStorageStatus | { backend: "injected" }> => store.status ? store.status() : { backend: "injected" };
   return { loadWorld, listFeatured, getCachedWorld, storageStatus, activeCollections: () => active };
 }
-let singleton: ReturnType<typeof createWorldService> | undefined;
+let singleton: Promise<ReturnType<typeof createWorldService>> | undefined;
 function service() {
-  if (!singleton) {
-    const config = getConfig();
-    singleton = createWorldService({
-      collector: new GitHubClient(config.githubToken, new PublicGitHubQuota(join(config.dataDir, "public-quota.sqlite"), config.githubRequestsPerHour).wrap(fetch)),
-      store: config.worldStore === "d1" ? new D1WorldStore({ endpoint: config.d1StorageUrl, secret: config.d1StorageSecret, databaseId: config.d1DatabaseId }) : new WorldStore(worldStorePath(config.dataDir)),
-    });
-  }
-  return singleton;
+  return singleton ??= getWorldResources().then(resources => createWorldService({ collector: resources.collector, store: resources.store }));
 }
 /** Public GitHub facts only. refreshAfter is an absolute epoch-millisecond cache expiry.
  * refresh bypasses the 90s TTL after a 15s minimum interval; no AI module is imported.
  * Rejects with GitHubError { status, code, message, retryAfter? } without cached evidence.
  * Failed refreshes retain the original capture timestamp and mark the snapshot STALE. */
-export const loadWorld = (input: string, options?: { refresh?: boolean; admit?: () => void }): Promise<WorldSnapshot> => service().loadWorld(input, options);
+export const loadWorld = async (input: string, options?: { refresh?: boolean; explicitRevalidation?: boolean; admit?: () => void }): Promise<WorldSnapshot> => (await service()).loadWorld(input, options);
 /** Curated catalog + persisted facts only; ready means a real cached snapshot exists. */
-export const listFeatured = (): Promise<FeaturedProject[]> => service().listFeatured();
+export const listFeatured = async (): Promise<FeaturedProject[]> => (await service()).listFeatured();
 /** Cache-only read: no GitHub or paid requests; null on a miss, STALE note on expiry.
  * This reads the backend snapshot, whose blueprint is rules-generated. Parent integration
  * overlays its independently cached successful AI blueprint for the exact repository/head. */
-export const getCachedWorld = (input: string): Promise<WorldSnapshot | null> => service().getCachedWorld(input);
-export const getWorldStorageState = async () => ({ ...(await service().storageStatus()), writesHeld: migrationHeld(), activeCollections: service().activeCollections(), activePublicAnalyses: activePublicAnalyses() });
+export const getCachedWorld = async (input: string): Promise<WorldSnapshot | null> => (await service()).getCachedWorld(input);
+export const getWorldStorageState = async () => {
+  const current = await service();
+  return { ...(await current.storageStatus()), writesHeld: migrationHeld(), activeCollections: current.activeCollections(), activePublicAnalyses: activePublicAnalyses() };
+};

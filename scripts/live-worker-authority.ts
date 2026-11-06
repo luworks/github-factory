@@ -1,18 +1,9 @@
 import { assertIdentity, stableJson, type StorageIdentity } from "../deploy/migration-contract";
 import { requireWorkerBindingAuthority } from "./worker-binding-authority";
+import { selectCurrentWorkerDeployment } from "./deployment-chronology";
 export interface WorkerDeploymentIdentity { deploymentId: string; versionId: string; moduleSha256: string }
 export interface WorkerManagementConfig { cloudflareAccountId: string; workerAuthority: WorkerDeploymentIdentity; storageIdentity: StorageIdentity }
 const uuid = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9-]{36}$/.test(value);
-function currentDeployment(value: any) {
-  if (!value || !Array.isArray(value.deployments) || !value.deployments.length) throw new Error("Current Worker deployment unavailable");
-  const rows = [...value.deployments];
-  if (rows.some((row) => !Number.isFinite(Date.parse(row?.created_on)))) throw new Error("Worker deployment chronology unknown");
-  rows.sort((a, b) => Date.parse(b.created_on) - Date.parse(a.created_on));
-  if (rows.length > 1 && rows[0].created_on === rows[1].created_on && rows[0].id !== rows[1].id) throw new Error("Ambiguous current Worker deployment");
-  const active = rows[0];
-  if (!uuid(active.id) || !Array.isArray(active.versions) || active.versions.length !== 1 || active.versions[0]?.percentage !== 100 || !uuid(active.versions[0].version_id)) throw new Error("Worker must have a single known 100% version");
-  return { deploymentId: active.id, versionId: active.versions[0].version_id };
-}
 async function moduleHash(response: Response) {
   const type = response.headers.get("content-type") || "", body = Buffer.from(await response.arrayBuffer());
   if (/^(application|text)\/javascript(?:\+module)?(?:\s*;|$)/i.test(type)) return new Bun.CryptoHasher("sha256").update(body).digest("hex");
@@ -48,12 +39,12 @@ export async function verifyLiveWorkerAuthority(config: WorkerManagementConfig, 
     return response;
   };
   const json = async (suffix: string) => { const body = await (await read(suffix)).json() as any; if (body?.success !== true) throw new Error("Worker management evidence rejected"); return body.result; };
-  const first = currentDeployment(await json("/deployments"));
+  const first = selectCurrentWorkerDeployment(await json("/deployments"));
   if (first.deploymentId !== config.workerAuthority.deploymentId || first.versionId !== config.workerAuthority.versionId) throw new Error("Worker deployment/version changed");
   const bindings = requireWorkerBindingAuthority(await json("/settings"), config.storageIdentity);
   const moduleSha256 = await moduleHash(await read(""));
   if (moduleSha256 !== config.workerAuthority.moduleSha256) throw new Error("Actual Worker module changed");
-  const last = currentDeployment(await json("/deployments"));
+  const last = selectCurrentWorkerDeployment(await json("/deployments"));
   const lastBindings = requireWorkerBindingAuthority(await json("/settings"), config.storageIdentity);
   if (stableJson(first) !== stableJson(last) || stableJson(bindings) !== stableJson(lastBindings)) throw new Error("Worker changed during authority observation");
   return { ...first, moduleSha256, bindings };

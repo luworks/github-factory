@@ -6,6 +6,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as AtlasRouteImport } from './routes/atlas'
 import { Route as ApiBudgetRouteImport } from './routes/api.budget'
 import { Route as ApiGalleryRouteImport } from './routes/api.gallery'
 import { Route as ApiHealthRouteImport } from './routes/api.health'
@@ -13,11 +14,17 @@ import { Route as ApiWorldsRouteImport } from './routes/api.worlds'
 import { Route as WorldOwnerRepoRouteImport } from './routes/world.$owner.$repo'
 import { Route as ApiBlueprintOwnerRepoRouteImport } from './routes/api.blueprint.$owner.$repo'
 import { Route as ApiGalleryPreviewOwnerRepoRouteImport } from './routes/api.gallery-preview.$owner.$repo'
+import { Route as ApiHistoryOwnerRepoRouteImport } from './routes/api.history.$owner.$repo'
 import { Route as ApiWorldOwnerRepoRouteImport } from './routes/api.world.$owner.$repo'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AtlasRoute = AtlasRouteImport.update({
+  id: '/atlas',
+  path: '/atlas',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ApiBudgetRoute = ApiBudgetRouteImport.update({
@@ -56,6 +63,11 @@ const ApiGalleryPreviewOwnerRepoRoute =
     path: '/api/gallery-preview/$owner/$repo',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiHistoryOwnerRepoRoute = ApiHistoryOwnerRepoRouteImport.update({
+  id: '/api/history/$owner/$repo',
+  path: '/api/history/$owner/$repo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiWorldOwnerRepoRoute = ApiWorldOwnerRepoRouteImport.update({
   id: '/api/world/$owner/$repo',
   path: '/api/world/$owner/$repo',
@@ -64,6 +76,7 @@ const ApiWorldOwnerRepoRoute = ApiWorldOwnerRepoRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/atlas': typeof AtlasRoute
   '/api/budget': typeof ApiBudgetRoute
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
@@ -71,10 +84,12 @@ export interface FileRoutesByFullPath {
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
+  '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/atlas': typeof AtlasRoute
   '/api/budget': typeof ApiBudgetRoute
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
@@ -82,11 +97,13 @@ export interface FileRoutesByTo {
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
+  '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/atlas': typeof AtlasRoute
   '/api/budget': typeof ApiBudgetRoute
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
@@ -94,12 +111,14 @@ export interface FileRoutesById {
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
+  '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/atlas'
     | '/api/budget'
     | '/api/gallery'
     | '/api/health'
@@ -107,10 +126,12 @@ export interface FileRouteTypes {
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
+    | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/atlas'
     | '/api/budget'
     | '/api/gallery'
     | '/api/health'
@@ -118,10 +139,12 @@ export interface FileRouteTypes {
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
+    | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
   id:
     | '__root__'
     | '/'
+    | '/atlas'
     | '/api/budget'
     | '/api/gallery'
     | '/api/health'
@@ -129,11 +152,13 @@ export interface FileRouteTypes {
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
+    | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AtlasRoute: typeof AtlasRoute
   ApiBudgetRoute: typeof ApiBudgetRoute
   ApiGalleryRoute: typeof ApiGalleryRoute
   ApiHealthRoute: typeof ApiHealthRoute
@@ -141,6 +166,7 @@ export interface RootRouteChildren {
   WorldOwnerRepoRoute: typeof WorldOwnerRepoRoute
   ApiBlueprintOwnerRepoRoute: typeof ApiBlueprintOwnerRepoRoute
   ApiGalleryPreviewOwnerRepoRoute: typeof ApiGalleryPreviewOwnerRepoRoute
+  ApiHistoryOwnerRepoRoute: typeof ApiHistoryOwnerRepoRoute
   ApiWorldOwnerRepoRoute: typeof ApiWorldOwnerRepoRoute
 }
 
@@ -151,6 +177,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/atlas': {
+      id: '/atlas'
+      path: '/atlas'
+      fullPath: '/atlas'
+      preLoaderRoute: typeof AtlasRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/budget': {
@@ -202,6 +235,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiGalleryPreviewOwnerRepoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/history/$owner/$repo': {
+      id: '/api/history/$owner/$repo'
+      path: '/api/history/$owner/$repo'
+      fullPath: '/api/history/$owner/$repo'
+      preLoaderRoute: typeof ApiHistoryOwnerRepoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/world/$owner/$repo': {
       id: '/api/world/$owner/$repo'
       path: '/api/world/$owner/$repo'
@@ -214,6 +254,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AtlasRoute: AtlasRoute,
   ApiBudgetRoute: ApiBudgetRoute,
   ApiGalleryRoute: ApiGalleryRoute,
   ApiHealthRoute: ApiHealthRoute,
@@ -221,6 +262,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorldOwnerRepoRoute: WorldOwnerRepoRoute,
   ApiBlueprintOwnerRepoRoute: ApiBlueprintOwnerRepoRoute,
   ApiGalleryPreviewOwnerRepoRoute: ApiGalleryPreviewOwnerRepoRoute,
+  ApiHistoryOwnerRepoRoute: ApiHistoryOwnerRepoRoute,
   ApiWorldOwnerRepoRoute: ApiWorldOwnerRepoRoute,
 }
 export const routeTree = rootRouteImport

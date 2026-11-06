@@ -5,8 +5,14 @@ export const Route = createFileRoute("/api/world/$owner/$repo")({
       GET: async ({ params, request }) => {
         const { json, apiError } = await import("../server/http");
         try {
+          const { worldReadMode, readCachedWorld } = await import("../server/cached-world");
+          const mode = worldReadMode(request.url);
           const { accessRequest } = await import("../server/access");
           const access = accessRequest(request);
+          if (mode === "cached") {
+            const { getCachedWorld } = await import("../server/service");
+            return json(await readCachedWorld(`${params.owner}/${params.repo}`, getCachedWorld));
+          }
           const { loadWorld } = await import("../server/service");
           const { getCachedBlueprint } = await import("../server/ai");
           const world = await loadWorld(`${params.owner}/${params.repo}`, { admit: access.admitCollection });

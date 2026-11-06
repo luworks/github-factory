@@ -32,7 +32,7 @@ async function camera(canvas: Locator): Promise<Camera> {
   });
 }
 
-async function nextDraw(canvas: Locator) {
+async function nextDraw(canvas: Locator, action: () => Promise<unknown>) {
   const frame = () =>
     canvas.evaluate(
       (element) =>
@@ -41,6 +41,7 @@ async function nextDraw(canvas: Locator) {
         )?.frame ?? 0,
     );
   const previous = await frame();
+  await action();
   await expect.poll(frame).toBeGreaterThan(previous);
 }
 
@@ -118,12 +119,12 @@ test("SYNTHETIC pointer pan, wheel zoom, pointer cancel and lost capture recover
     await page.mouse.down();
     await page.mouse.move(start.x + 25, start.y + 10, { steps: 2 });
     const pointerId = Number(await canvas.getAttribute("data-test-pointer-id"));
-    await canvas.dispatchEvent(eventName, { pointerId, pointerType: "mouse", bubbles: true });
-    await page.mouse.up();
-    await nextDraw(canvas);
+    await nextDraw(canvas, async () => {
+      await canvas.dispatchEvent(eventName, { pointerId, pointerType: "mouse", bubbles: true });
+      await page.mouse.up();
+    });
     const cancelled = await camera(canvas);
-    await page.mouse.move(start.x + 90, start.y + 40, { steps: 4 });
-    await nextDraw(canvas);
+    await nextDraw(canvas, () => page.mouse.move(start.x + 90, start.y + 40, { steps: 4 }));
     expect(await camera(canvas)).toEqual(cancelled);
     await page.mouse.down();
     await page.mouse.move(start.x + 130, start.y + 40, { steps: 4 });
@@ -183,9 +184,8 @@ test("SYNTHETIC facts refresh preserves the user's camera and selected district"
   refreshed.collectedAt = new Date(Date.now()).toISOString();
   api.respond("POST", "/api/world/synthetic-moonshot/browser-fixture", () => ({ body: refreshed }));
   await openWorld(page);
-  await page.locator(".district-row").filter({ hasText: "SYNTHETIC Web" }).click();
   const canvas = page.getByTestId("world-canvas");
-  await nextDraw(canvas);
+  await nextDraw(canvas, () => page.locator(".district-row").filter({ hasText: "SYNTHETIC Web" }).click());
   await canvas.focus();
   const initial = await camera(canvas);
   await canvas.press("ArrowRight");
@@ -194,9 +194,8 @@ test("SYNTHETIC facts refresh preserves the user's camera and selected district"
   await canvas.press("+");
   await expect.poll(async () => (await camera(canvas)).scale).toBeGreaterThan(panned.scale);
   const viewpoint = await camera(canvas);
-  await page.getByRole("button", { name: "Refresh GitHub data" }).click();
+  await nextDraw(canvas, () => page.getByRole("button", { name: "Refresh GitHub data" }).click());
   await expect(page.locator(".world-source-stamp code")).toHaveText("ddddddd");
-  await nextDraw(canvas);
   expect(await camera(canvas)).toEqual(viewpoint);
   await expect(page.locator(".inspector").getByRole("heading", { name: "SYNTHETIC Web", exact: true })).toBeVisible();
   expect(api.requests.filter((request) => request.path.startsWith("/api/blueprint/"))).toEqual([]);

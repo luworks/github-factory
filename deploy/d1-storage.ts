@@ -17,7 +17,7 @@ export interface StorageEnvironment {
   WORLDS_DB?: WorldD1Binding; FACTORY_STORAGE_SECRET?: string;
   FACTORY_STORAGE_DATABASE_ID?: string; FACTORY_MIGRATION_EPOCH?: string;
   FACTORY_SOURCE_SHA?: string; FACTORY_WORKER_BUNDLE_SHA256?: string;
-  FACTORY_ADMISSION_FENCE?: string; FACTORY_STORAGE_MODE?: string;
+  FACTORY_ADMISSION_FENCE?: string; FACTORY_STORAGE_MODE?: string; FACTORY_STORAGE_BINDING_NONCE?: string;
 }
 const reply = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 const record = (x: unknown): x is Record<string, unknown> => Boolean(x) && typeof x === "object" && !Array.isArray(x);
@@ -33,26 +33,33 @@ async function equalSecret(actual: string, expected: string) {
   for (let i = 0; i < a.length; i++) different |= a[i]! ^ b[i]!;
   return different === 0;
 }
-async function boundedBody(request: Request) {
-  if (Number(request.headers.get("content-length")) > 2 * 1024 * 1024) throw new Error("invalid input");
+async function boundedBody(request: Request, proofOnly = false) {
+  const maxBytes = proofOnly ? 4096 : 2 * 1024 * 1024;
+  if (Number(request.headers.get("content-length")) > maxBytes) throw new Error("invalid input");
   const reader = request.body?.getReader(); if (!reader) throw new Error("invalid input");
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = proofOnly ? new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("invalid input")), 5000); }) : null;
   const chunks: Uint8Array[] = []; let length = 0;
-  try { for (;;) { const { value, done } = await reader.read(); if (done) break; length += value.byteLength; if (length > 2 * 1024 * 1024) throw new Error("invalid input"); chunks.push(value); } }
-  finally { await reader.cancel().catch(() => {}); }
+  try { for (;;) { const { value, done } = await (timeout ? Promise.race([reader.read(), timeout]) : reader.read()); if (done) break; length += value.byteLength; if (length > maxBytes) { clearTimeout(timer); throw new Error("invalid input"); } chunks.push(value); } }
+  finally { clearTimeout(timer); if (proofOnly) void reader.cancel().catch(() => {}); else await reader.cancel().catch(() => {}); }
   const bytes = new Uint8Array(length); let offset = 0; for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-  const body = JSON.parse(new TextDecoder().decode(bytes)); if (!record(body)) throw new Error("invalid input"); return body;
+  const body = JSON.parse(new TextDecoder("utf-8", { fatal: proofOnly }).decode(bytes)); if (!record(body)) throw new Error("invalid input"); return body;
 }
 
 /** Private fixed-operation RPC. It accepts neither caller SQL nor URLs/prompts,
  * and this Worker has no model key, management token or paid ledger binding. */
-export async function worldStorageRpc(request: Request, env: StorageEnvironment): Promise<Response> {
+export async function worldStorageRpc(request: Request, env: StorageEnvironment, profile: "default" | "rollback-proof" = "default"): Promise<Response> {
   if (!(await equalSecret(request.headers.get("x-factory-storage-key") || "", env.FACTORY_STORAGE_SECRET || "")))
     return reply({ error: "Storage authorization required" }, 403);
+  if (profile !== "default" && profile !== "rollback-proof") return reply({ error: "Storage profile rejected" }, 403);
+  const proofOnly = profile === "rollback-proof";
+  if (proofOnly && (env.FACTORY_STORAGE_MODE !== "probe-only" || env.FACTORY_STORAGE_DATABASE_ID !== "b2210c4a-4ed3-49ba-b044-2f6c24958fac" || env.FACTORY_ADMISSION_FENCE !== "" || !/^[a-f0-9]{32}$/.test(env.FACTORY_STORAGE_BINDING_NONCE || ""))) return reply({ error: "Proof configuration unavailable" }, 503);
   if (request.method !== "POST" || request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json")
     return reply({ error: "Storage operation rejected" }, 400);
   if (!env.WORLDS_DB) return reply({ error: "Authoritative storage unavailable" }, 503);
   let body: Record<string, unknown>;
-  try { body = await boundedBody(request); } catch { return reply({ error: "Storage operation rejected" }, 400); }
+  try { body = await boundedBody(request, proofOnly); } catch { return reply({ error: "Storage operation rejected" }, 400); }
+  if (proofOnly && !(body.op === "status" && fields(body, ["op"]) || body.op === "probe" && fields(body, ["op", "action", "nonce"]) && body.action === "rollback" && typeof body.nonce === "string" && /^[a-f0-9]{32}$/.test(body.nonce))) return reply({ error: "Only status and rollback proof permitted" }, 403);
   const db = env.WORLDS_DB.withSession?.("first-primary") ?? env.WORLDS_DB;
   let identity: StorageIdentity;
   const ok = (result: unknown) => reply({ ok: true, backend: "d1", op: body.op, identity, result });
@@ -60,7 +67,7 @@ export async function worldStorageRpc(request: Request, env: StorageEnvironment)
     if (!["probe-only", "worlds"].includes(env.FACTORY_STORAGE_MODE || "")) throw new Error("Storage mode unavailable");
     if (env.FACTORY_STORAGE_MODE === "probe-only" && body.op !== "status" && body.op !== "probe") return reply({ error: "This bridge permits synthetic probes only" }, 403);
     const stored = await db.prepare("SELECT database_uuid,binding_nonce FROM storage_identity WHERE singleton=1").first<{ database_uuid: string; binding_nonce: string }>();
-    if (!stored || stored.database_uuid !== env.FACTORY_STORAGE_DATABASE_ID || !/^[a-f0-9]{32}$/.test(stored.binding_nonce) ||
+    if (!stored || proofOnly && stored.binding_nonce !== env.FACTORY_STORAGE_BINDING_NONCE || stored.database_uuid !== env.FACTORY_STORAGE_DATABASE_ID || !/^[a-f0-9]{32}$/.test(stored.binding_nonce) ||
       !/^[a-f0-9]{32}$/.test(env.FACTORY_MIGRATION_EPOCH || "") || !/^[a-f0-9]{40}$/.test(env.FACTORY_SOURCE_SHA || "") || !/^[a-f0-9]{64}$/.test(env.FACTORY_WORKER_BUNDLE_SHA256 || "")) throw new Error("D1 identity unavailable");
     identity = { databaseId: stored.database_uuid, bindingNonce: stored.binding_nonce, epoch: env.FACTORY_MIGRATION_EPOCH!, sourceSha: env.FACTORY_SOURCE_SHA!, workerBundleSha256: env.FACTORY_WORKER_BUNDLE_SHA256!, admissionFenced: env.FACTORY_ADMISSION_FENCE === env.FACTORY_MIGRATION_EPOCH };
     if (body.op === "migrationSnapshot") {
@@ -145,6 +152,7 @@ export async function worldStorageRpc(request: Request, env: StorageEnvironment)
       return ok({ backend: "d1", authoritative: true, databaseId: identity.databaseId, schemaVersion: version.version, worlds: worlds.count, aliases: aliases.count });
     }
     if (body.op === "probe") {
+      if (proofOnly && (await db.prepare("SELECT MAX(version) version FROM schema_migrations").first<{version:number}>())?.version !== 2) throw new Error("D1 schema unavailable");
       if (!fields(body, ["op", "action", "nonce"]) || typeof body.nonce !== "string" || !/^[a-f0-9]{32}$/.test(body.nonce)) throw new TypeError();
       const id = `storage-rpc-synthetic-${body.nonce}`;
       if (body.action === "rollback") {
