@@ -310,3 +310,41 @@ export function terrain(g: Pen, style: StyleId, nodes: PlacedNode[], seed: strin
     }
   }
 }
+/** Scenery anchors for live FX (water shimmer, rail, landing pad). Mirrors terrain() geometry exactly. */
+export interface SceneryAnchors {
+  river: { from: [number, number]; c1: [number, number]; c2: [number, number]; to: [number, number]; width: number } | null;
+  lakes: { x: number; y: number }[];
+  rail: { y: number; x0: number; x1: number } | null;
+  pad: { x: number; y: number } | null;
+  bounds: { x: number; y: number; width: number; height: number };
+}
+export function sceneryAnchors(style: StyleId, nodes: PlacedNode[], seed: string): SceneryAnchors {
+  const b = mapBounds(nodes),
+    cx = b.x + b.width / 2,
+    cy = b.y + b.height / 2;
+  const lakes: { x: number; y: number }[] = [];
+  if (style === "civilization")
+    for (let r = -10; r <= 10; r++)
+      for (let q = -12; q <= 12; q++) {
+        const x = (q + r * 0.5) * 166.28,
+          y = r * 108;
+        if (Math.abs(x) > 1550) continue;
+        if (hash(`${seed}:${q}:${r}`) % 17 < 3 && clearOfNodes(nodes, x, y, 90)) lakes.push({ x, y });
+      }
+  const riverStyle = style === "red-alert" || style === "red-alert-2";
+  return {
+    river: riverStyle
+      ? {
+          from: [cx - b.width * 0.8, cy + b.height * 0.58],
+          c1: [cx - b.width * 0.4, cy - b.height * 0.2],
+          c2: [cx + b.width * 0.35, cy + b.height * 0.8],
+          to: [cx + b.width * 0.8, cy - b.height * 0.1],
+          width: 49,
+        }
+      : null,
+    lakes,
+    rail: style === "factorio" ? { y: b.y + b.height - 73, x0: b.x - 200, x1: b.x + b.width + 200 } : null,
+    pad: style === "moonshot" ? { x: 0, y: -4 } : null,
+    bounds: b,
+  };
+}
