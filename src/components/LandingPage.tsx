@@ -1,13 +1,12 @@
 import { appPath } from "../base-path";
 import { CURATED_PROJECTS } from "../catalog";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowRight,
   ArrowUpRight,
   Github,
   Globe2,
   GitBranch,
-  Star,
   Activity,
   Box,
   ChevronRight,
@@ -16,11 +15,44 @@ import {
   Layers3,
 } from "lucide-react";
 import type { FeaturedProject, StyleId } from "../contracts";
-import { WorldCanvas } from "../world/WorldCanvas";
-import { illustration, STYLES } from "../client/demo";
-import { createWorld, getGallery, shortNumber } from "../client/api";
+import { STYLES } from "../client/demo";
+import { createWorld, getGallery } from "../client/api";
 import { Brand } from "./shared";
-import { RepositoryPreview } from "./RepositoryPreview";
+import { HeroScene } from "./HeroScene";
+import { ProjectCard } from "./ProjectCard";
+import "./landing-motion.css";
+
+/** Adds `is-revealed` to `.reveal` elements as they scroll in (staggered by CSS). */
+function useReveal(root: React.RefObject<HTMLElement | null>, deps: unknown[]) {
+  useEffect(() => {
+    const el = root.current;
+    if (!el) return;
+    el.classList.add("motion-ready");
+    const io = new IntersectionObserver((entries) => {
+      for (const entry of entries) if (entry.isIntersecting) { entry.target.classList.add("is-revealed"); io.unobserve(entry.target); }
+    }, { rootMargin: "0px 0px -8% 0px" });
+    el.querySelectorAll(".reveal:not(.is-revealed)").forEach((node) => io.observe(node));
+    return () => io.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, deps);
+}
+
+/** Elapsed seconds while mapping, written directly to a span (no page re-render). */
+function MappingProgress() {
+  const counter = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    const start = performance.now();
+    const timer = window.setInterval(() => { if (counter.current) counter.current.textContent = `${Math.floor((performance.now() - start) / 1000)}s`; }, 250);
+    return () => window.clearInterval(timer);
+  }, []);
+  return (
+    <div className="mapping-progress" aria-hidden="true">
+      <span className="mapping-bar"><i /></span>
+      <span className="mapping-steps"><b>Survey</b><b>Architecture</b><b>Activity</b><b>World</b></span>
+      <span ref={counter} className="mapping-elapsed">0s</span>
+    </div>
+  );
+}
 export function LandingPage() {
   const [repo, setRepo] = useState(""),
     [busy, setBusy] = useState(false),
@@ -30,7 +62,9 @@ export function LandingPage() {
   const [ready, setReady] = useState(false);
   const [galleryLoaded, setGalleryLoaded] = useState(false);
   useEffect(() => setReady(true), []);
-  const sample = useMemo(illustration, []);
+  const root = useRef<HTMLDivElement>(null);
+  useReveal(root, [gallery]);
+  const current = STYLES.find((s) => s.id === style) ?? STYLES[0];
   useEffect(() => {
     let active = true;
     getGallery()
@@ -57,7 +91,7 @@ export function LandingPage() {
     }
   };
   return (
-    <div className="landing">
+    <div className="landing" ref={root}>
       <header className="site-header">
         <Brand />
         <nav>
@@ -122,10 +156,13 @@ export function LandingPage() {
               {"Enter any publicly accessible GitHub repository URL; license metadata is shown as reported. Generating an AI guide sends a limited survey of paths, architecture and activity to the configured AI provider."}
             </p>
             {busy && (
-              <div role="status" className="mapping-status">
-                <span className="signal-dot" />
-                {"Surveying public source, architecture and activity. Large repositories may take a moment."}
-              </div>
+              <>
+                <div role="status" className="mapping-status">
+                  <span className="signal-dot" />
+                  {"Surveying public source, architecture and activity. Large repositories may take a moment."}
+                </div>
+                <MappingProgress />
+              </>
             )}
             {error && (
               <div className="form-error" role="alert">
@@ -153,15 +190,23 @@ export function LandingPage() {
               </span>
             </div>
           </div>
-          <div className="hero-scene">
+          <div className={`hero-scene hero-style-${style}`}>
             <div className="hero-scene-top">
               <span>
                 <span className="signal-dot" />
                 WORLD PREVIEW
               </span>
-              <span>SECTOR 001 / MOON FACTORY</span>
+              <span key={style} className="hero-sector">{`SECTOR 00${STYLES.indexOf(current) + 1} / ${current.name.toUpperCase()}`}</span>
             </div>
-            <WorldCanvas world={sample} style={style} selectedId={null} onSelect={() => {}} className="hero-world" />
+            <HeroScene style={style} />
+            <div className="hero-style-chips" role="group" aria-label="Hero world style">
+              {STYLES.map((s) => (
+                <button key={s.id} type="button" className={`hero-chip chip-${s.id}`} aria-pressed={style === s.id} aria-label={s.name} onClick={() => setStyle(s.id)} title={s.name}>
+                  <span className="hero-chip-glyph" aria-hidden="true">{s.glyph}</span>
+                  <span className="hero-chip-name">{s.name}</span>
+                </button>
+              ))}
+            </div>
             <div className="hero-scene-bottom">
               <span>AN ILLUSTRATIVE WORLD</span>
               <span>
@@ -174,7 +219,7 @@ export function LandingPage() {
             </div>
           </div>
         </section>
-        <section className="principle-strip">
+        <section className="principle-strip reveal">
           <div>
             <span className="strip-number">01 /</span>
             <Box size={18} />
@@ -212,42 +257,8 @@ export function LandingPage() {
             </span>
           </div>
           <div className="project-grid">
-            {gallery.map((p) => (
-              <div className="project-card-shell" key={p.fullName}>
-              <a className="project-card" href={p.ready ? appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`) : undefined} aria-disabled={!p.ready} tabIndex={p.ready ? undefined : -1} onClick={(e) => { if (!p.ready) e.preventDefault(); }} >
-                <div className="project-art">
-                  <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} enabled={galleryLoaded} />
-                  <span className="project-category">{p.category}</span>
-                  <span className="project-arrow">
-                    <ArrowUpRight size={18} />
-                  </span>
-                </div>
-                <div className="project-card-body">
-                  <span className="project-owner">{p.fullName.split("/")[0]} /</span>
-                  <h3>{p.name}</h3>
-                  <p>{p.description}</p>
-                  <div className="project-meta">
-                    <span>
-                      <span className={`language-dot lang-${p.language?.toLowerCase()}`} />
-                      {p.language ?? "Repository"}
-                    </span>
-                    {p.stars !== null && (
-                      <span>
-                        <Star size={12} />
-                        {shortNumber(p.stars)}
-                      </span>
-                    )}
-                    <span className="project-ready">
-                      {p.ready ? ("Explore world") : ("Map unavailable")}
-                      <ArrowRight size={12} />
-                    </span>
-                  </div>
-                </div>
-              </a>
-              <a className="project-source-link" href={`https://github.com/${p.fullName}`} target="_blank" rel="noopener noreferrer" aria-label={`${"GitHub source"}: ${p.fullName}`}>
-                <Github size={11} /> {"Source"}
-              </a>
-              </div>
+            {gallery.map((p, index) => (
+              <ProjectCard key={p.fullName} project={p} enabled={galleryLoaded} index={index} />
             ))}
           </div>
         </section>
@@ -263,12 +274,15 @@ export function LandingPage() {
             {STYLES.map((s) => (
               <button
                 key={s.id}
-                className={`style-option ${style === s.id ? "selected" : ""}`}
+                type="button"
+                className={`style-option reveal swatch-${s.id} ${style === s.id ? "selected" : ""}`}
+                style={{ "--reveal-delay": `${STYLES.indexOf(s) * 80}ms` } as React.CSSProperties}
                 onClick={() => {
                   setStyle(s.id);
                   document.getElementById("launch")?.scrollIntoView({ behavior: "smooth" });
                 }}
               >
+                <span className="style-swatch" aria-hidden="true"><i /><i /><i /></span>
                 <span className={`style-symbol symbol-${s.id}`}>{s.glyph}</span>
                 <strong>{s.name}</strong>
                 <small>{s.subtitle}</small>
@@ -277,8 +291,8 @@ export function LandingPage() {
             ))}
           </div>
         </section>
-        <section className="closing-line">
-          <span className="closing-orbit">◒</span>
+        <section className="closing-line reveal">
+          <span className="closing-orbit" aria-hidden="true"><span>◒</span></span>
           <h2>{"Code was meant to be explored."}</h2>
           <a href="#launch">
             {"Your world starts here"}
