@@ -11,11 +11,13 @@ import { Route as ApiBudgetRouteImport } from './routes/api.budget'
 import { Route as ApiGalleryRouteImport } from './routes/api.gallery'
 import { Route as ApiHealthRouteImport } from './routes/api.health'
 import { Route as ApiWorldsRouteImport } from './routes/api.worlds'
+import { Route as OgHomeDotpngRouteImport } from './routes/og.home[.]png'
 import { Route as WorldOwnerRepoRouteImport } from './routes/world.$owner.$repo'
 import { Route as ApiBlueprintOwnerRepoRouteImport } from './routes/api.blueprint.$owner.$repo'
 import { Route as ApiGalleryPreviewOwnerRepoRouteImport } from './routes/api.gallery-preview.$owner.$repo'
 import { Route as ApiHistoryOwnerRepoRouteImport } from './routes/api.history.$owner.$repo'
 import { Route as ApiWorldOwnerRepoRouteImport } from './routes/api.world.$owner.$repo'
+import { Route as OgWorldOwnerRepoRouteImport } from './routes/og.world.$owner.$repo'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -47,6 +49,11 @@ const ApiWorldsRoute = ApiWorldsRouteImport.update({
   path: '/api/worlds',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OgHomeDotpngRoute = OgHomeDotpngRouteImport.update({
+  id: '/og/home.png',
+  path: '/og/home.png',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorldOwnerRepoRoute = WorldOwnerRepoRouteImport.update({
   id: '/world/$owner/$repo',
   path: '/world/$owner/$repo',
@@ -73,6 +80,11 @@ const ApiWorldOwnerRepoRoute = ApiWorldOwnerRepoRouteImport.update({
   path: '/api/world/$owner/$repo',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OgWorldOwnerRepoRoute = OgWorldOwnerRepoRouteImport.update({
+  id: '/og/world/$owner/$repo',
+  path: '/og/world/$owner/$repo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -81,11 +93,13 @@ export interface FileRoutesByFullPath {
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
   '/api/worlds': typeof ApiWorldsRoute
+  '/og/home.png': typeof OgHomeDotpngRoute
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
   '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
+  '/og/world/$owner/$repo': typeof OgWorldOwnerRepoRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -94,11 +108,13 @@ export interface FileRoutesByTo {
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
   '/api/worlds': typeof ApiWorldsRoute
+  '/og/home.png': typeof OgHomeDotpngRoute
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
   '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
+  '/og/world/$owner/$repo': typeof OgWorldOwnerRepoRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -108,11 +124,13 @@ export interface FileRoutesById {
   '/api/gallery': typeof ApiGalleryRoute
   '/api/health': typeof ApiHealthRoute
   '/api/worlds': typeof ApiWorldsRoute
+  '/og/home.png': typeof OgHomeDotpngRoute
   '/world/$owner/$repo': typeof WorldOwnerRepoRoute
   '/api/blueprint/$owner/$repo': typeof ApiBlueprintOwnerRepoRoute
   '/api/gallery-preview/$owner/$repo': typeof ApiGalleryPreviewOwnerRepoRoute
   '/api/history/$owner/$repo': typeof ApiHistoryOwnerRepoRoute
   '/api/world/$owner/$repo': typeof ApiWorldOwnerRepoRoute
+  '/og/world/$owner/$repo': typeof OgWorldOwnerRepoRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -123,11 +141,13 @@ export interface FileRouteTypes {
     | '/api/gallery'
     | '/api/health'
     | '/api/worlds'
+    | '/og/home.png'
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
     | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
+    | '/og/world/$owner/$repo'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -136,11 +156,13 @@ export interface FileRouteTypes {
     | '/api/gallery'
     | '/api/health'
     | '/api/worlds'
+    | '/og/home.png'
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
     | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
+    | '/og/world/$owner/$repo'
   id:
     | '__root__'
     | '/'
@@ -149,11 +171,13 @@ export interface FileRouteTypes {
     | '/api/gallery'
     | '/api/health'
     | '/api/worlds'
+    | '/og/home.png'
     | '/world/$owner/$repo'
     | '/api/blueprint/$owner/$repo'
     | '/api/gallery-preview/$owner/$repo'
     | '/api/history/$owner/$repo'
     | '/api/world/$owner/$repo'
+    | '/og/world/$owner/$repo'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -163,11 +187,13 @@ export interface RootRouteChildren {
   ApiGalleryRoute: typeof ApiGalleryRoute
   ApiHealthRoute: typeof ApiHealthRoute
   ApiWorldsRoute: typeof ApiWorldsRoute
+  OgHomeDotpngRoute: typeof OgHomeDotpngRoute
   WorldOwnerRepoRoute: typeof WorldOwnerRepoRoute
   ApiBlueprintOwnerRepoRoute: typeof ApiBlueprintOwnerRepoRoute
   ApiGalleryPreviewOwnerRepoRoute: typeof ApiGalleryPreviewOwnerRepoRoute
   ApiHistoryOwnerRepoRoute: typeof ApiHistoryOwnerRepoRoute
   ApiWorldOwnerRepoRoute: typeof ApiWorldOwnerRepoRoute
+  OgWorldOwnerRepoRoute: typeof OgWorldOwnerRepoRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -214,6 +240,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWorldsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/og/home.png': {
+      id: '/og/home.png'
+      path: '/og/home.png'
+      fullPath: '/og/home.png'
+      preLoaderRoute: typeof OgHomeDotpngRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/world/$owner/$repo': {
       id: '/world/$owner/$repo'
       path: '/world/$owner/$repo'
@@ -249,6 +282,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiWorldOwnerRepoRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/og/world/$owner/$repo': {
+      id: '/og/world/$owner/$repo'
+      path: '/og/world/$owner/$repo'
+      fullPath: '/og/world/$owner/$repo'
+      preLoaderRoute: typeof OgWorldOwnerRepoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -259,11 +299,13 @@ const rootRouteChildren: RootRouteChildren = {
   ApiGalleryRoute: ApiGalleryRoute,
   ApiHealthRoute: ApiHealthRoute,
   ApiWorldsRoute: ApiWorldsRoute,
+  OgHomeDotpngRoute: OgHomeDotpngRoute,
   WorldOwnerRepoRoute: WorldOwnerRepoRoute,
   ApiBlueprintOwnerRepoRoute: ApiBlueprintOwnerRepoRoute,
   ApiGalleryPreviewOwnerRepoRoute: ApiGalleryPreviewOwnerRepoRoute,
   ApiHistoryOwnerRepoRoute: ApiHistoryOwnerRepoRoute,
   ApiWorldOwnerRepoRoute: ApiWorldOwnerRepoRoute,
+  OgWorldOwnerRepoRoute: OgWorldOwnerRepoRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
