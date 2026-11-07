@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Minus, Plus, Maximize2 } from "lucide-react";
 import type { StyleId, WorldEdge, WorldSnapshot } from "../contracts";
-import { layoutWorld, mapBounds, pickNode, type PlacedNode } from "./layout";
+import { layoutWorld, mapBounds, pickNode, type LabelRect, type PlacedNode } from "./layout";
 import { paintTerrain, paintConnections, paintBuilding, paintLabels, PALETTES } from "./paint";
 import { setSunlight, setWind } from "./primitives";
 import { sceneryAnchors, type SceneryAnchors } from "./terrain";
@@ -29,6 +29,18 @@ export interface WorldCanvasProps {
   className?: string;
   onRendered?: () => void;
   paused?: boolean;
+  /** Optional programmatic camera (e.g. a guided tour); omitted = classic fit-to-world behaviour. */
+  camera?: CameraTarget | null;
+}
+/** Frames one district (`nodeId`) or the whole world (`null`) at `zoom`× the fitted scale, placed
+ * at `anchor` (viewport fractions, default centre). The view snaps when the layout changes or
+ * motion is reduced/paused and otherwise eases with `glide` (ms time constant, default 120).
+ * Reset returns to this target. */
+export interface CameraTarget {
+  nodeId: string | null;
+  zoom?: number;
+  glide?: number;
+  anchor?: readonly [number, number];
 }
 type Camera = { x: number; y: number; k: number };
 const MIN_ZOOM = 0.18,
@@ -36,7 +48,7 @@ const MIN_ZOOM = 0.18,
 /** Frame budgets with ~2ms slack so a 60Hz display is not halved by RAF jitter. */
 const FAST_FRAME = 1000 / 60 - 2,
   SLOW_FRAME = 1000 / 30 - 2;
-export function WorldCanvas({ world, style, selectedId, onSelect, className = "", onRendered, paused = false }: WorldCanvasProps) {
+export function WorldCanvas({ world, style, selectedId, onSelect, className = "", onRendered, paused = false, camera = null }: WorldCanvasProps) {
   const canvas = useRef<HTMLCanvasElement>(null),
     box = useRef<HTMLDivElement>(null),
     /** Rendered camera (eases toward `goal` when motion is allowed; equals it otherwise). */
@@ -48,9 +60,9 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     lastInput = useRef(0),
     moving = useRef(false);
   const drag = useRef<{ id: number; x: number; y: number; cx: number; cy: number; moved: boolean; lx: number; ly: number; lt: number; vx: number; vy: number } | null>(null);
-  const data = useRef({ world, style, selectedId, onSelect, onRendered, paused });
+  const data = useRef({ world, style, selectedId, onSelect, onRendered, paused, camera });
   const renderedIdentity = useRef("");
-  data.current = { world, style, selectedId, onSelect, onRendered, paused };
+  data.current = { world, style, selectedId, onSelect, onRendered, paused, camera };
   const layoutIdentity = useRef("");
   const invalidate = useRef(() => {}), reconcileMotion = useRef(() => {});
   const placed = useRef<PlacedNode[]>([]),
@@ -70,9 +82,23 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       k = Math.min(w / b.width, h / b.height) * 0.88;
     return { k, x: w / 2 - (b.x + b.width / 2) * k, y: h / 2 - (b.y + b.height / 2) * k };
   };
+  /** The fitted view, or the programmatic camera target when one is supplied. */
+  const home = (): Camera => {
+    const f = fit(),
+      target = data.current.camera;
+    if (!target) return f;
+    const { w, h } = size.current,
+      k = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, f.k * (target.zoom ?? 1))),
+      node = target.nodeId ? placed.current.find((p) => p.node.id === target.nodeId) : undefined,
+      b = mapBounds(placed.current),
+      cx = node ? node.x : b.x + b.width / 2,
+      cy = node ? node.y - node.height * 0.45 : b.y + b.height / 2,
+      [ax, ay] = target.anchor ?? [0.5, 0.5];
+    return { k, x: w * ax - cx * k, y: h * ay - cy * k };
+  };
   const reset = (snap = false) => {
     inertia.current = { x: 0, y: 0 };
-    aim(fit(), snap);
+    aim(home(), snap);
   };
   useEffect(() => {
     const identity = `${world.repo.fullName}:${style}:${world.nodes
@@ -105,6 +131,10 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     invalidate.current();
   }, [selectedId]);
   useEffect(() => {
+    // Declared after the layout/selection effects so a programmatic target wins the same commit.
+    if (camera) reset();
+  }, [camera?.nodeId, camera?.zoom, camera?.anchor?.[0], camera?.anchor?.[1]]);
+  useEffect(() => {
     const cv = canvas.current,
       el = box.current;
     if (!cv || !el) return;
@@ -118,6 +148,18 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     let drift = 0, cost = 0, slow = false, frames = 0;
     const retro = document.createElement("canvas"), retroContext = retro.getContext("2d")!;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // HTML chrome over the canvas (marked data-canvas-occluder, plus our own
+    // controls). Measured on resize only, never inside a frame.
+    let blocked: LabelRect[] = [];
+    const occluders = () => [
+      ...(el.parentElement?.querySelectorAll<HTMLElement>(":scope > [data-canvas-occluder]") ?? []),
+      ...el.querySelectorAll<HTMLElement>(".camera-controls, .map-hint, .map-coordinates"),
+    ];
+    const measureOccluders = () => {
+      const r = el.getBoundingClientRect();
+      blocked = occluders().map((o) => o.getBoundingClientRect()).filter((b) => b.width > 0 && b.height > 0)
+        .map((b) => ({ id: "", x: b.left - r.left, y: b.top - r.top, width: b.width, height: b.height }));
+    };
     const animated = () => !motion.matches && !data.current.paused;
     let previousMode = animated();
     moving.current = previousMode;
@@ -142,6 +184,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     const resize = () => {
       const r = el.getBoundingClientRect(), old = size.current;
       if (r.width < 1 || r.height < 1) { stop(); return; }
+      measureOccluders();
       if (sized && r.width === old.w && r.height === old.h) return;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       size.current = { w: r.width, h: r.height };
@@ -159,7 +202,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
         v.x *= decay; v.y *= decay;
         if (Math.hypot(v.x, v.y) < 0.01) inertia.current = { x: 0, y: 0 };
       }
-      const a = 1 - Math.exp(-dt / 120);
+      const a = 1 - Math.exp(-dt / (data.current.camera?.glide ?? 120));
       c.x += (target.x - c.x) * a; c.y += (target.y - c.y) * a; c.k *= Math.pow(target.k / c.k, a);
       if (Math.abs(target.x - c.x) < 0.05 && Math.abs(target.y - c.y) < 0.05 && Math.abs(target.k / c.k - 1) < 1e-4) cam.current = { ...target };
       // Gentle idle drift fades in after a few seconds without input, and out on any input.
@@ -269,7 +312,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       vignette.addColorStop(1, s === "civilization" ? "#514b3026" : "#07101666");
       g.fillStyle = vignette;
       g.fillRect(0, 0, width, height);
-      paintLabels(g, placed.current, s, sel, hover.current, c);
+      paintLabels(g, placed.current, s, sel, hover.current, c, { width, height, blocked });
       const identity = JSON.stringify([w.repo.fullName, w.headSha, w.collectedAt, w.source]);
       if (identity !== renderedIdentity.current) { renderedIdentity.current = identity; data.current.onRendered?.(); }
       // Adaptive quality: hold 60fps when the frame is cheap, fall back to 30fps when it is not.
@@ -280,6 +323,8 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       request();
     };
     const observer = new ResizeObserver(resize); observer.observe(el); resize();
+    const chrome = new ResizeObserver(() => { measureOccluders(); dirty = true; request(); });
+    for (const o of occluders()) chrome.observe(o);
     const intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? false; if (visible) { dirty = true; request(); } else stop(); });
     intersection.observe(el);
     const visibility = () => { if (document.hidden) stop(); else { dirty = true; request(); } };
@@ -298,7 +343,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     cv.addEventListener("wheel", wheel, { passive: false });
     return () => {
       stopped = true; stop();
-      observer.disconnect(); intersection.disconnect();
+      observer.disconnect(); intersection.disconnect(); chrome.disconnect();
       document.removeEventListener("visibilitychange", visibility); motion.removeEventListener("change", media);
       invalidate.current = () => {}; reconcileMotion.current = () => {};
       cv.removeEventListener("wheel", wheel);

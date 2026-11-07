@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { constrain, fit, pan, resizeCamera, wheelFactor, zoomAt, type Camera, type Point, type Size } from "./camera";
-import { homeBounds, type CacheStatus, type Landmark } from "./model";
+import { constrain, easeCamera, fit, pan, resizeCamera, unproject, wheelFactor, zoomAt, type Camera, type Point, type Size } from "./camera";
+import { homeBounds, statusText, type CacheStatus, type Landmark } from "./model";
 import { contains, paintAtlas, type HitTarget } from "./paint";
+import { createScenery } from "./scenery";
 interface Props {
     landmarks: Landmark[];
     statuses: Map<string, CacheStatus>;
@@ -20,15 +21,20 @@ interface Props {
     onClear: () => void;
     onView: (camera: Camera, homeZoom: number, commit: boolean) => void;
 }
+type Change = { animate?: boolean; anchor?: { screen: Point; world: Point } | null };
+/** Ambient scenery is capped near 30fps; camera easing runs at display rate. */
+const AMBIENT_MS = 1000 / 30 - 4, STILL_TIME = 4.2;
 export function AtlasCanvas(props: Props) {
     const canvas = useRef<HTMLCanvasElement>(null), wrap = useRef<HTMLDivElement>(null), data = useRef(props);
     data.current = props;
     const view = useRef<{
         camera: Camera;
+        target: Camera;
+        anchor: Change["anchor"];
         size: Size;
         initialized: boolean;
-    }>({ camera: { centerX: 1400, centerY: 1000, zoom: .2 }, size: { width: 1, height: 1 }, initialized: false });
-    const targets = useRef<HitTarget[]>([]), invalidate = useRef(() => { }), commitView = useRef<(c: Camera, commit?: boolean) => void>(() => { }), cancelGesture = useRef<(silent?: boolean) => void>(() => { });
+    }>({ camera: { centerX: 1400, centerY: 1000, zoom: .2 }, target: { centerX: 1400, centerY: 1000, zoom: .2 }, anchor: null, size: { width: 1, height: 1 }, initialized: false });
+    const targets = useRef<HitTarget[]>([]), invalidate = useRef(() => { }), commitView = useRef<(c: Camera, commit?: boolean, how?: Change) => void>(() => { }), cancelGesture = useRef<(silent?: boolean) => void>(() => { });
     const pointers = useRef(new Map<number, Point>()), gesture = useRef<{
         mode: "drag" | "pinch";
         camera: Camera;
@@ -40,55 +46,97 @@ export function AtlasCanvas(props: Props) {
     } | null>(null), suppressTap = useRef(false);
     const [unavailable, setUnavailable] = useState(false), [tooltip, setTooltip] = useState<{
         text: string;
+        detail: string;
         x: number;
         y: number;
         key: string;
     } | null>(null);
-    const hoverTimer = useRef<ReturnType<typeof setTimeout>>(), hoverKey = useRef<string | null>(null);
+    const hoverTimer = useRef<ReturnType<typeof setTimeout>>(), hoverKey = useRef<string | null>(null), hoverMix = useRef(0);
+    const setHover = (key: string | null) => { if (hoverKey.current === key) return; hoverKey.current = key; hoverMix.current = 0; if (canvas.current) canvas.current.style.cursor = key ? "pointer" : ""; invalidate.current(); };
     const clearHover = () => { if (hoverTimer.current)
-        clearTimeout(hoverTimer.current); hoverTimer.current = undefined; hoverKey.current = null; setTooltip(null); invalidate.current(); };
-    const change = (c: Camera, commit = false) => commitView.current(c, commit);
-    const home = () => change(fit(homeBounds(data.current.landmarks), view.current.size), true);
+        clearTimeout(hoverTimer.current); hoverTimer.current = undefined; setHover(null); setTooltip(null); };
+    const change = (c: Camera, commit = false, how: Change = {}) => commitView.current(c, commit, how);
+    const center = () => ({ x: view.current.size.width / 2, y: view.current.size.height / 2 });
+    const zoomBy = (factor: number, at: Point = center()) => { const v = view.current; change(zoomAt(v.target, factor, at, v.size), true, { animate: true, anchor: { screen: at, world: unproject(at, v.target, v.size) } }); };
+    const home = () => change(fit(homeBounds(data.current.landmarks), view.current.size), true, { animate: true });
     const locate = (key: string | null) => { const p = data.current.landmarks.find(x => x.repoKey === key); if (p)
-        change({ ...view.current.camera, centerX: p.x, centerY: p.y }, true); };
+        change({ ...view.current.target, centerX: p.x, centerY: p.y }, true, { animate: true }); };
     useEffect(() => {
         const cv = canvas.current, el = wrap.current;
         if (!cv || !el)
             return;
-        let raf = 0, visible = true, disposed = false, lastPaint = -Infinity;
+        let raf = 0, timer: ReturnType<typeof setTimeout> | 0 = 0, visible = true, disposed = false, stepAt = 0, motionState = "";
         const context = cv.getContext("2d");
         if (!context) {
             setUnavailable(true);
             return;
         }
+        const scenery = createScenery(context), started = performance.now(), reduced = window.matchMedia("(prefers-reduced-motion: reduce)");
+        let motion = !reduced.matches;
         const eligible = () => !disposed && visible && !document.hidden && el.clientWidth > 0 && el.clientHeight > 0;
-        const request = () => { if (!raf && eligible())
+        const request = () => { if (timer) {
+            clearTimeout(timer);
+            timer = 0;
+        } if (!raf && eligible())
             raf = requestAnimationFrame(draw); };
+        const mark = (state: string) => { if (state !== motionState) {
+            motionState = state;
+            el.dataset.motion = state;
+        } };
         const draw = (now: number) => {
             raf = 0;
             if (!eligible())
                 return;
-            if (now - lastPaint < 1000 / 30) {
-                request();
-                return;
+            const v = view.current, dt = Math.max(0, now - (stepAt || now)), size = v.size, ratio = cv.width / size.width;
+            stepAt = now;
+            let moving = false;
+            if (v.camera !== v.target) {
+                const next = motion ? easeCamera(v.camera, v.target, dt, size, v.anchor) : null;
+                v.camera = next ?? v.target;
+                if (next)
+                    moving = true;
+                else
+                    v.anchor = null;
             }
-            lastPaint = now;
-            const { size, camera } = view.current, ratio = cv.width / size.width;
+            const easingHover = motion && !!hoverKey.current && hoverMix.current < 1;
+            hoverMix.current = motion ? Math.min(1, hoverMix.current + dt / 140) : 1;
             context.setTransform(ratio, 0, 0, ratio, 0, 0);
-            targets.current = paintAtlas(context, data.current.landmarks, camera, size, data.current.statuses, data.current.selected, hoverKey.current, data.current.lit);
+            targets.current = paintAtlas(context, { points: data.current.landmarks, camera: v.camera, size, statuses: data.current.statuses, selected: data.current.selected, hover: hoverKey.current, hoverMix: hoverMix.current, lit: data.current.lit ?? new Set(), time: motion ? (now - started) / 1000 : STILL_TIME, animated: motion, ratio, scenery });
+            mark(moving ? "camera" : motion ? "ambient" : "still");
+            if (moving || easingHover)
+                request();
+            else if (motion)
+                timer = setTimeout(() => { timer = 0; request(); }, AMBIENT_MS);
         };
         invalidate.current = request;
-        commitView.current = (camera, commit = false) => { view.current.camera = constrain(camera, view.current.size); data.current.onView(view.current.camera, fit(homeBounds(data.current.landmarks), view.current.size).zoom, commit); request(); };
+        commitView.current = (camera, commit = false, how = {}) => {
+            const v = view.current, wasMoving = v.camera !== v.target;
+            v.target = constrain(camera, v.size);
+            if (how.animate && motion) {
+                v.anchor = how.anchor ?? null;
+                if (!wasMoving)
+                    stepAt = performance.now();
+            }
+            else {
+                v.camera = v.target;
+                v.anchor = null;
+            }
+            data.current.onView(v.target, fit(homeBounds(data.current.landmarks), v.size).zoom, commit);
+            request();
+        };
         const resize = () => {
             const rect = el.getBoundingClientRect(), size = { width: rect.width, height: rect.height };
             if (size.width < 1 || size.height < 1)
                 return;
             const old = view.current, home = homeBounds(data.current.landmarks), homeCamera = fit(home, size), saved = data.current.initialView;
-            const camera = old.initialized ? resizeCamera(old.camera, old.size, size, home) : saved ? constrain({ centerX: saved.centerX, centerY: saved.centerY, zoom: homeCamera.zoom * saved.zoomRatio }, size) : constrain(homeCamera, size);
+            const camera = old.initialized ? resizeCamera(old.target, old.size, size, home) : saved ? constrain({ centerX: saved.centerX, centerY: saved.centerY, zoom: homeCamera.zoom * saved.zoomRatio }, size) : constrain(homeCamera, size);
             const pixels = size.width < 600 ? 1500000 : 4000000, ratio = Math.min(1.5, window.devicePixelRatio || 1, Math.sqrt(pixels / (size.width * size.height)));
             cv.width = Math.max(1, Math.floor(size.width * ratio));
             cv.height = Math.max(1, Math.floor(size.height * ratio));
-            view.current = { camera, size, initialized: true };
+            // First arrival without a saved view eases in from a wider shot (motion only).
+            const intro = !old.initialized && !saved && motion ? constrain({ ...camera, zoom: camera.zoom * .78 }, size) : camera;
+            view.current = { camera: intro, target: camera, anchor: null, size, initialized: true };
+            stepAt = performance.now();
             data.current.onView(camera, homeCamera.zoom, false);
             request();
         };
@@ -97,7 +145,11 @@ export function AtlasCanvas(props: Props) {
         resize();
         const stop = () => {
             if (raf) cancelAnimationFrame(raf);
+            if (timer) clearTimeout(timer);
             raf = 0;
+            timer = 0;
+            stepAt = 0;
+            mark("paused");
             cancelGesture.current(disposed);
         };
         const intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? false; if (visible)
@@ -110,13 +162,15 @@ export function AtlasCanvas(props: Props) {
         else
             request(); };
         document.addEventListener("visibilitychange", visibility);
+        const onMotion = () => { motion = !reduced.matches; request(); };
+        reduced.addEventListener("change", onMotion);
         const blur = () => cancelGesture.current();
         window.addEventListener("blur", blur);
         const wheel = (e: WheelEvent) => { if (e.ctrlKey || e.metaKey)
-            return; e.preventDefault(); clearHover(); const r = cv.getBoundingClientRect(); change(zoomAt(view.current.camera, wheelFactor(e.deltaY, e.deltaMode, r.height), { x: e.clientX - r.left, y: e.clientY - r.top }, view.current.size), true); };
+            return; e.preventDefault(); clearHover(); const r = cv.getBoundingClientRect(); zoomBy(wheelFactor(e.deltaY, e.deltaMode, r.height), { x: e.clientX - r.left, y: e.clientY - r.top }); };
         cv.addEventListener("wheel", wheel, { passive: false });
-        return () => { disposed = true; stop(); observer.disconnect(); intersection.disconnect(); document.removeEventListener("visibilitychange", visibility); window.removeEventListener("blur", blur); cv.removeEventListener("wheel", wheel); if (hoverTimer.current)
-            clearTimeout(hoverTimer.current); cv.width = 0; cv.height = 0; invalidate.current = () => { }; commitView.current = () => { }; };
+        return () => { disposed = true; stop(); observer.disconnect(); intersection.disconnect(); document.removeEventListener("visibilitychange", visibility); reduced.removeEventListener("change", onMotion); window.removeEventListener("blur", blur); cv.removeEventListener("wheel", wheel); if (hoverTimer.current)
+            clearTimeout(hoverTimer.current); scenery.dispose(); cv.width = 0; cv.height = 0; invalidate.current = () => { }; commitView.current = () => { }; };
     }, []);
     useEffect(() => { invalidate.current(); }, [props.landmarks, props.statuses, props.selected, props.lit]);
     useEffect(() => { if (props.locateRequest)
@@ -128,6 +182,10 @@ export function AtlasCanvas(props: Props) {
             return;
         clearHover();
         const p = point(e);
+        if (view.current.camera !== view.current.target) {
+            view.current.target = view.current.camera;
+            view.current.anchor = null;
+        }
         pointers.current.set(e.pointerId, p);
         e.currentTarget.setPointerCapture(e.pointerId);
         const all = [...pointers.current.values()];
@@ -141,13 +199,16 @@ export function AtlasCanvas(props: Props) {
     const move = (e: ReactPointerEvent<HTMLCanvasElement>) => {
         const p = point(e), g = gesture.current;
         if (!pointers.current.has(e.pointerId) || !g) {
-            if (e.pointerType === "mouse" && !props.selected) {
+            if (e.pointerType === "mouse") {
                 if (hoverTimer.current)
                     clearTimeout(hoverTimer.current);
                 const hit = hits(p);
                 if (hit.length === 1 && hit[0].keys.length === 1) {
                     const key = hit[0].keys[0], landmark = props.landmarks.find(x => x.repoKey === key);
-                    hoverTimer.current = setTimeout(() => { hoverKey.current = key; setTooltip({ key, text: landmark?.fullName ?? key, x: Math.max(8, Math.min(p.x + 12, view.current.size.width - 288)), y: Math.max(8, Math.min(p.y - 48, view.current.size.height - 60)) }); invalidate.current(); }, 120);
+                    setHover(key);
+                    if (props.selected)
+                        return;
+                    hoverTimer.current = setTimeout(() => { setTooltip({ key, text: landmark?.fullName ?? key, detail: `${landmark ? landmark.category + " · " : ""}${statusText(props.statuses.get(key))}`, x: Math.max(8, Math.min(p.x + 16, view.current.size.width - 288)), y: Math.max(8, Math.min(p.y - 64, view.current.size.height - 76)) }); }, 120);
                 }
                 else
                     clearHover();
@@ -195,6 +256,7 @@ export function AtlasCanvas(props: Props) {
         for (const id of ids) if (cv?.hasPointerCapture(id)) cv.releasePointerCapture(id);
         if (hoverTimer.current) clearTimeout(hoverTimer.current);
         hoverKey.current = null;
+        if (cv) cv.style.cursor = "";
         if (!silent) setTooltip(null);
     };
     return <div className="atlas-map" ref={wrap}>
@@ -203,18 +265,18 @@ export function AtlasCanvas(props: Props) {
             clearHover(); }} onKeyDown={e => {
                 if (e.ctrlKey || e.metaKey || e.altKey)
                     return;
-                const c = view.current.camera, s = view.current.size, step = e.shiftKey ? 128 : 64;
+                const s = view.current.size, step = e.shiftKey ? 128 : 64;
                 const deltas: Record<string, [
                     number,
                     number
                 ]> = { ArrowLeft: [step, 0], ArrowRight: [-step, 0], ArrowUp: [0, step], ArrowDown: [0, -step] };
                 if (deltas[e.key]) {
                     e.preventDefault();
-                    change(pan(c, ...deltas[e.key], s), true);
+                    change(pan(view.current.target, ...deltas[e.key], s), true, { animate: true });
                 }
                 else if (["+", "=", "-"].includes(e.key)) {
                     e.preventDefault();
-                    change(zoomAt(c, e.key === "-" ? 1 / 1.2 : 1.2, { x: s.width / 2, y: s.height / 2 }, s), true);
+                    zoomBy(e.key === "-" ? 1 / 1.2 : 1.2);
                 }
                 else if (e.key === "0") {
                     e.preventDefault();
@@ -231,13 +293,19 @@ export function AtlasCanvas(props: Props) {
                         props.onClear();
                 }
             }}/>}
-  {tooltip && !props.selected && <div className="atlas-tooltip" style={{ left: tooltip.x, top: tooltip.y }}>{tooltip.text}</div>}
+  {tooltip && !props.selected && <div className="atlas-tooltip" style={{ left: tooltip.x, top: tooltip.y }}><strong>{tooltip.text}</strong><span>{tooltip.detail}</span></div>}
   <div className="atlas-camera" aria-label="Atlas camera controls">
-   <button aria-label="Zoom in Atlas" onClick={() => change(zoomAt(view.current.camera, 1.2, { x: view.current.size.width / 2, y: view.current.size.height / 2 }, view.current.size), true)}>+</button>
-   <button aria-label="Zoom out Atlas" onClick={() => change(zoomAt(view.current.camera, 1 / 1.2, { x: view.current.size.width / 2, y: view.current.size.height / 2 }, view.current.size), true)}>−</button>
+   <button aria-label="Zoom in Atlas" onClick={() => zoomBy(1.2)}>+</button>
+   <button aria-label="Zoom out Atlas" onClick={() => zoomBy(1 / 1.2)}>−</button>
    <button aria-label="Atlas home" onClick={home}>⌂</button>
    <button aria-label="Locate selected landmark" disabled={!props.selected} onClick={() => locate(props.selected)}>⌖</button>
   </div>
-  <p className="atlas-map-note">Scenic routes, not dependency links · Static scenery</p>
+  <div className="atlas-hud" aria-hidden="true"><span>Observatory chart</span><span>Editorial regions · not live data</span></div>
+  <ul className="atlas-legend" aria-label="Map legend">
+   <li><i className="atlas-legend-planet"/>Verified cached capture</li>
+   <li><i className="atlas-legend-ghost">?</i>Unchecked · outline only</li>
+   <li><i className="atlas-legend-lantern">✧</i>Lantern lit</li>
+  </ul>
+  <p className="atlas-map-note">Scenic routes, not dependency links · Illustrative motion, not live data</p>
  </div>;
 }

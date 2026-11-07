@@ -45,6 +45,8 @@ import { WorldCanvas } from "../world/WorldCanvas";
 import { STYLES } from "../client/demo";
 import { clock, enrichWorld, getBudget, getCachedWorld, getWorld, refreshWorld, shortNumber } from "../client/api";
 import { Brand, External } from "./shared";
+import { Fact, ProvenanceDisclosure, confidenceCounts, statusCounts, type ProvenanceTone } from "./Provenance";
+import "./world-chrome.css";
 /** Keep source text intact while offering natural identifier wrapping points. */
 function identifierBreaks(value: string) {
   return value.split(/(?<=[/@_.-])/u).map((part, i) => <span key={i}>{part}<wbr /></span>);
@@ -66,6 +68,38 @@ function ciSummary(w: WorldSnapshot) {
     label: `${passed} passed · ${w.workflows.length - passed} other`,
     tone: passed === w.workflows.length ? "healthy" : "neutral",
   };
+}
+const PT_DAY = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "America/Los_Angeles" });
+const PT_FULL = new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/Los_Angeles" });
+/** Calm summary + full provenance record for the world topline. */
+function WorldProvenance({ world, stale }: { world: WorldSnapshot; stale: boolean }) {
+  const kind = world.source === "demo" ? "demo" : stale ? "stale" : world.health.github === "error" ? "error" : world.health.github === "partial" ? "partial" : "connected";
+  const status = { demo: "ILLUSTRATION", stale: "STALE CACHE · CURRENT STATE UNKNOWN", error: "UPLINK DEGRADED", partial: "PARTIAL SNAPSHOT", connected: "GITHUB CONNECTED" }[kind];
+  const lead = { demo: "Illustration", stale: "Stale snapshot", error: "Uplink degraded", partial: "Partial snapshot", connected: "Snapshot" }[kind];
+  const short = { demo: "Illustration", stale: "Stale", error: "Degraded", partial: "Partial", connected: "Snapshot" }[kind];
+  const tone: ProvenanceTone = { demo: "demo", stale: "stale", error: "error", partial: "partial", connected: "fresh" }[kind] as ProvenanceTone;
+  const collected = new Date(world.collectedAt);
+  const valid = !Number.isNaN(collected.getTime());
+  return (
+    <ProvenanceDisclosure
+      className={`world-provenance ${kind}`}
+      tone={tone}
+      title="Snapshot provenance"
+      summary={<><span className="world-provenance-lead">{lead}</span><span className="world-provenance-short">{short}</span>{valid && <span className="world-provenance-when"><span className="sep">·</span>{PT_DAY.format(collected)}<span className="world-provenance-time">, {clock(world.collectedAt)}</span></span>}</>}
+    >
+      <p className="provenance-status">{status}</p>
+      <dl>
+        <Fact term="Captured">{valid ? <time dateTime={world.collectedAt}>{PT_FULL.format(collected)} PT</time> : "capture time unknown"}</Fact>
+        <Fact term="Source"><External href={`${world.repo.url}/commit/${world.headSha}`}>{`${world.repo.defaultBranch} · ${world.headSha.slice(0, 7)}`}</External></Fact>
+        <Fact term="Districts">{world.nodes.length} · {confidenceCounts(world.nodes)}</Fact>
+        <Fact term="Links">{world.edges.length} · {confidenceCounts(world.edges)}</Fact>
+        <Fact term="Status">{statusCounts(world.nodes)}</Fact>
+        <Fact term="Path tree">{world.coverage.tree === "full" ? "available" : world.coverage.tree === "truncated" ? "partially sampled" : "unavailable"}</Fact>
+      </dl>
+      <p className="provenance-note">{"Source-driven world · motion illustrates connections"}</p>
+      <p className="provenance-note">{"Architecture inference labeled · not runtime telemetry"}</p>
+    </ProvenanceDisclosure>
+  );
 }
 export function ExplorerPage({
   owner,
@@ -141,6 +175,31 @@ export function ExplorerPage({
     setAtlasToken(validatedReturnToken(window.location.search,readAtlasSession().value));
     return subscribeExploration(()=>setProgressRevision(x=>x+1));
   },[cachedOnly]);
+  // The style switcher scrolls horizontally on narrow screens: keep the active
+  // style in view and fade only the edges that hide more options.
+  const dock = useRef<HTMLDivElement>(null);
+  const [dockEdge, setDockEdge] = useState<"none" | "start" | "end" | "both">("none");
+  const updateDockEdges = useCallback(() => {
+    const el = dock.current;
+    if (!el) return;
+    const max = el.scrollWidth - el.clientWidth;
+    const start = el.scrollLeft > 2, end = el.scrollLeft < max - 2;
+    setDockEdge(start && end ? "both" : start ? "start" : end ? "end" : "none");
+  }, []);
+  const hasWorld = !!world;
+  useEffect(() => {
+    const el = dock.current;
+    if (!el) return;
+    const active = el.querySelector<HTMLElement>("button.active");
+    if (active && el.scrollWidth > el.clientWidth + 1) {
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollTo({ left: active.offsetLeft - (el.clientWidth - active.offsetWidth) / 2, behavior: reduce ? "auto" : "smooth" });
+    }
+    updateDockEdges();
+    const observer = new ResizeObserver(updateDockEdges);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [style, hasWorld, updateDockEdges]);
   const changeStyle = (s: StyleId) => {
     setStyle(s);
     const url = new URL(window.location.href);
@@ -249,19 +308,7 @@ export function ExplorerPage({
       ) : (
         <>
           <div className="world-topline">
-            <div className={`world-signal ${world.source === "demo" ? "demo" : stale ? "stale" : world.health.github === "error" ? "error" : world.health.github === "partial" ? "partial" : "connected"}`}>
-              <span className="signal-dot" />
-              {world.source === "demo"
-                ? "ILLUSTRATION"
-                : stale
-                  ? "STALE CACHE · CURRENT STATE UNKNOWN"
-                  : world.health.github === "error"
-                    ? "UPLINK DEGRADED"
-                    : world.health.github === "partial"
-                      ? "PARTIAL SNAPSHOT"
-                      : "GITHUB CONNECTED"}
-              <span className="signal-time">{clock(world.collectedAt)}</span>
-            </div>
+            <WorldProvenance world={world} stale={stale} />
             <div className="world-tabs">
               {[
                 { id: "world", icon: Map, en: "World" },
@@ -350,7 +397,7 @@ export function ExplorerPage({
                 <>
                   <WorldCanvas paused={motionPaused || showReplay} world={world} style={style} selectedId={selectedId} onSelect={select} onRendered={() => { const identity = worldIdentity(world); if (cachedOnly && identity) noteExploration(identity,"visited"); }} />
                   {showReplay && cachedOnly && <HistoryReplay world={world} available={sourceVerified}/>}
-                  <div className="stage-heading">
+                  <div className="stage-heading" data-canvas-occluder="">
                     <span className="stage-eyebrow">{styleInfo.name.toUpperCase()} / REPOSITORY WORLD</span>
                     <h1>
                       {world.repo.name}
@@ -358,10 +405,10 @@ export function ExplorerPage({
                     </h1>
                     <p>{world.repo.description?.slice(0, 150)}</p>
                   </div>
-                  <div className="stage-tools">
+                  <div className="stage-tools" data-canvas-occluder="">
                     <button className={showLayers ? "active" : ""} onClick={() => setShowLayers(!showLayers)}>
                       <Layers3 size={15} />
-                      {"Map legend"}
+                      <span className="stage-tool-label">{"Map legend"}</span>
                     </button>
                     {showLayers && (
                       <div className="map-legend">
@@ -383,10 +430,6 @@ export function ExplorerPage({
                         </small>
                       </div>
                     )}
-                  </div>
-                  <div className="world-caption">
-                    <ShieldCheck size={12} />
-                    {"SOURCE-DRIVEN WORLD · MOTION ILLUSTRATES CONNECTIONS"}
                   </div>
                 </>
               ) : tab === "activity" ? (
@@ -541,7 +584,7 @@ export function ExplorerPage({
                   )}
                 </div>
               )}
-              <div className="style-dock" role="group" aria-label="World perspective">
+              <div className="style-dock" role="group" aria-label="World perspective" data-canvas-occluder="" ref={dock} onScroll={updateDockEdges} data-edge={dockEdge}>
                 {STYLES.map((s) => (
                   <button
                     key={s.id}
@@ -708,7 +751,6 @@ export function ExplorerPage({
               <span className="signal-dot" />
               {"Powered by Meta Muse Spark 1.3"}
             </span>
-            <span>{"ARCHITECTURE INFERENCE LABELED · NOT RUNTIME TELEMETRY"}</span>
           </footer>
         </>
       )}

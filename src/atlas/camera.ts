@@ -36,4 +36,17 @@ export function zoomAt(c: Camera, factor: number, point: Point, s: Size) {
     return constrain({ ...bounded, centerX: bounded.centerX + before.x - after.x, centerY: bounded.centerY + before.y - after.y }, s);
 }
 export function resizeCamera(c: Camera, old: Size, next: Size, home: Bounds) { return constrain({ ...c, zoom: fit(home, next).zoom * c.zoom / fit(home, old).zoom }, next); }
+/** One exponential easing step from `from` toward `to` over `dt` ms (zoom eases
+ * in log space). With an `anchor`, the anchored world point stays under the same
+ * screen point throughout, so pointer zoom does not drift. Returns null once the
+ * remaining motion is below a quarter pixel: the caller then snaps to `to`. */
+export function easeCamera(from: Camera, to: Camera, dt: number, s: Size, anchor?: { screen: Point; world: Point } | null, tau = 110): Camera | null {
+    const k = 1 - Math.exp(-Math.max(0, Math.min(dt, 100)) / tau);
+    const zoom = Math.exp(Math.log(from.zoom) + (Math.log(to.zoom) - Math.log(from.zoom)) * k);
+    let next: Camera = { centerX: from.centerX + (to.centerX - from.centerX) * k, centerY: from.centerY + (to.centerY - from.centerY) * k, zoom };
+    if (anchor && Math.abs(Math.log(to.zoom / from.zoom)) > 1e-6)
+        next = constrain({ zoom, centerX: anchor.world.x - (anchor.screen.x - s.width / 2) / zoom, centerY: anchor.world.y - (anchor.screen.y - s.height / 2) / zoom }, s);
+    const pixels = Math.hypot(next.centerX - to.centerX, next.centerY - to.centerY) * to.zoom, zoomGap = Math.abs(Math.log(next.zoom / to.zoom));
+    return pixels < .25 && zoomGap < 1e-3 ? null : next;
+}
 export const wheelFactor = (delta: number, mode: number, height: number) => Math.exp(-clamp(delta * (mode === 1 ? 16 : mode === 2 ? height : 1), -240, 240) * .0015);

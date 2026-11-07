@@ -1,0 +1,92 @@
+/* World page chrome: calm provenance chip, compact mobile layout, scrollable style switcher.
+ * Prefixed with .explorer so it wins over the base stylesheet regardless of load order. */
+
+/* ---- Provenance chip on the light topline ---- */
+.explorer .world-provenance .provenance-trigger {
+  background: var(--geist-surface); color: var(--geist-secondary); border-color: var(--geist-border);
+  backdrop-filter: none; -webkit-backdrop-filter: none; min-height: 30px;
+}
+.explorer .world-provenance .provenance-trigger:hover,
+.explorer .world-provenance[data-open="true"] .provenance-trigger { background: var(--geist-hover); border-color: var(--geist-control-border); color: var(--geist-fg); }
+.explorer .world-provenance-lead { color: var(--geist-fg); }
+.explorer .world-provenance-short { display: none; color: var(--geist-fg); }
+.explorer .world-provenance .provenance-dot { box-shadow: none; }
+.explorer .world-provenance[data-tone="stale"] .provenance-dot,
+.explorer .world-provenance[data-tone="partial"] .provenance-dot { background: #d97706; }
+.explorer .world-provenance[data-tone="fresh"] .provenance-dot { background: #16a34a; }
+.explorer .world-provenance[data-tone="error"] .provenance-dot { background: #dc2626; }
+.explorer .world-provenance .provenance-panel { z-index: 30; }
+.explorer .world-topline { min-height: 52px; }
+
+/* ---- Map chrome: the caption strip is gone, so everything settles lower ---- */
+.explorer .style-dock { bottom: 16px; }
+.explorer .map-hint { bottom: 76px; opacity: .85; }
+.explorer .camera-controls, .explorer .map-coordinates { bottom: 116px; }
+.explorer .map-tooltip { bottom: 70px; }
+.explorer .stage-heading { padding: 12px 14px; border-radius: 6px; background: #171717e0; }
+
+/* ---- Style switcher: horizontally scrollable with snap and edge fades ---- */
+.explorer .style-dock {
+  overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x proximity; scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.explorer .style-dock::-webkit-scrollbar { display: none; }
+.explorer .style-dock button { scroll-snap-align: center; }
+.explorer .style-dock[data-edge="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 36px), #0000); mask-image: linear-gradient(to right, #000 calc(100% - 36px), #0000); }
+.explorer .style-dock[data-edge="start"] { -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 36px), #0000); mask-image: linear-gradient(to left, #000 calc(100% - 36px), #0000); }
+.explorer .style-dock[data-edge="both"] { -webkit-mask-image: linear-gradient(to right, #0000, #000 36px, #000 calc(100% - 36px), #0000); mask-image: linear-gradient(to right, #0000, #000 36px, #000 calc(100% - 36px), #0000); }
+
+@media (max-width: 900px) {
+  /* One row: tabs and stamp keep their size, the chip yields (time moves into the panel). */
+  .explorer .world-topline { padding-block: 6px; flex-wrap: nowrap; min-height: 52px; }
+  .explorer .world-topline > .world-provenance { flex: 0 1 auto; min-width: 0; }
+  .explorer .world-topline > .world-tabs { flex: none; flex-wrap: nowrap; height: auto; }
+  .explorer .world-topline > .world-source-stamp { flex: none; flex-wrap: nowrap; }
+  .explorer .world-provenance-time { display: none; }
+  .explorer .stage-tools > button { gap: 8px; }
+}
+
+@media (max-width: 600px) {
+  /* Header + topline: two short rows instead of a tall, half-empty block. */
+  .explorer .explorer-header { min-height: 52px; padding-block: 8px; gap: 10px; }
+  .explorer .world-topline { min-height: 0; padding: 4px 12px; gap: 6px 10px; flex-wrap: nowrap; justify-content: flex-start; }
+  .explorer .world-topline > .world-provenance { order: 2; flex: none; margin-left: auto; }
+  .explorer .world-topline > .world-tabs { order: 1; flex: 0 1 auto; gap: 12px; flex-wrap: nowrap; min-width: 0; height: auto; }
+  .explorer .world-topline > .world-source-stamp { order: 3; flex: none; gap: 0; }
+  .explorer .world-source-stamp > svg, .explorer .world-source-stamp { font-size: 0; }
+  .explorer .world-source-stamp > svg { display: none; }
+  .explorer .world-source-stamp code { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); margin: 0; padding: 0; }
+  .explorer .world-source-stamp button { padding: 8px 4px; }
+  .explorer .world-tabs button { min-height: 40px; padding: 0 1px; }
+  .explorer .world-provenance .provenance-trigger { padding: 3px 8px 3px 7px; min-height: 28px; gap: 6px; }
+  .explorer .world-provenance-lead, .explorer .world-provenance-when { display: none; }
+  .explorer .world-provenance-short { display: inline; }
+  /* Panel drops below the whole topline at stage width instead of hanging off the small chip. */
+  .explorer .world-topline { position: relative; z-index: 20; }
+  .explorer .world-topline > .world-provenance { position: static; }
+  .explorer .world-provenance .provenance-panel { top: calc(100% + 4px); left: 12px; right: 12px; width: auto; min-width: 0; max-width: none; }
+
+  /* Heading: name first; the eyebrow and description step back. */
+  .explorer .stage-heading { top: 12px; left: 12px; max-width: calc(100% - 80px); padding: 8px 12px; }
+  .explorer .stage-eyebrow { display: none; }
+  .explorer .stage-heading h1 { font-size: 22px; margin: 0; }
+  .explorer .stage-heading h1 > span { font-size: 14px; margin-left: 8px; }
+  .explorer .stage-heading p { margin-top: 2px; display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; max-width: none; }
+  .explorer .stage-tools { top: 12px; right: 12px; }
+  .explorer .stage-tools > button { padding: 0; width: 40px; height: 40px; justify-content: center; }
+  .explorer .stage-tool-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
+
+  /* Touch: drag/pinch is discoverable; free the map instead of a desktop hint. */
+  .explorer .map-hint { display: none; }
+  .explorer .camera-controls { bottom: 68px; right: 12px; }
+  .explorer .map-tooltip { bottom: 68px; }
+
+  /* Style switcher spans the stage and scrolls; the active style is kept in view. */
+  .explorer .style-dock { left: 12px; right: 12px; bottom: 10px; transform: none; max-width: none; width: auto; padding: 3px; gap: 2px; }
+  .explorer .style-dock button { padding: 8px 10px; min-height: 40px; }
+}
+
+@media (max-width: 400px) {
+  .explorer .world-tabs button > svg { display: none; }
+  .explorer .world-topline > .world-tabs { gap: 10px; }
+}
