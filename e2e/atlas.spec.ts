@@ -78,7 +78,9 @@ test("SYNTHETIC unchecked, real cache miss and 503 stay separate, with no implic
     await expect(page.locator(".atlas-card")).not.toContainText("Not collected");
     expect(api.requests.every((r: any) => r.method === "GET")).toBe(true);
 });
-test("SYNTHETIC actual painted map label selects the same repository as its visible list and stays idle", async ({ page, api }) => {
+const motion = (page: any) => page.locator(".atlas-map").getAttribute("data-motion");
+const frames = (cv: any) => cv.evaluate((c: any) => c.__frames ?? 0);
+test("SYNTHETIC actual painted map label selects the same repository as its visible list; ambient motion is capped and reduced motion stays idle", async ({ page, api }) => {
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await fixture(page, api);
     await page.goto(atlasPath);
@@ -87,6 +89,8 @@ test("SYNTHETIC actual painted map label selects the same repository as its visi
     await page.getByRole("button", { name: "Close selected landmark" }).click();
     const mapTab = page.getByRole("button", { name: "Map", exact: true }); if (await mapTab.isVisible()) await mapTab.click();
     const cv = page.locator(".atlas-map > canvas");
+    // Labels only move while the camera eases; read them once it has settled.
+    await expect.poll(() => motion(page)).toBe("ambient");
     await expect.poll(() => cv.evaluate((c: any, key: string) => c.__labels?.some((p: any) => p.text === key), keys[0])).toBe(true);
     const label = await cv.evaluate((c: any, key: string) => c.__labels.find((p: any) => p.text === key), keys[0]), box = (await cv.boundingBox())!;
     await page.mouse.click(box.x + label.x, box.y + label.y);
@@ -94,10 +98,20 @@ test("SYNTHETIC actual painted map label selects the same repository as its visi
     await page.getByRole("link", { name: "Back to Atlas", exact: true }).click();
     await expect(row(page, keys[0])).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".atlas-card")).toContainText("a".repeat(40));
+    // Ambient twinkle/route motion runs at about 30fps, never the display rate.
+    await expect.poll(() => motion(page)).toBe("ambient");
+    const start = await frames(cv);
+    await page.waitForTimeout(1000);
+    const ambient = await frames(cv) - start;
+    expect(ambient).toBeGreaterThan(5);
+    expect(ambient).toBeLessThanOrEqual(36);
+    // Switching to reduced motion stops the loop: static frames on demand only.
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await expect.poll(() => motion(page)).toBe("still");
     await page.waitForTimeout(150);
-    const before = await cv.evaluate((c: any) => c.__frames);
-    await page.waitForTimeout(200);
-    expect(await cv.evaluate((c: any) => c.__frames)).toBe(before);
+    const before = await frames(cv);
+    await page.waitForTimeout(250);
+    expect(await frames(cv)).toBe(before);
     const dimensions = await cv.evaluate((c: any) => ({ width: c.width, height: c.height, css: c.getBoundingClientRect().width }));
     expect(dimensions.width / dimensions.css).toBeLessThanOrEqual(1.501);
     expect(dimensions.width * dimensions.height).toBeLessThanOrEqual(4000000);
@@ -135,6 +149,34 @@ test("SYNTHETIC hidden Atlas map stops drawing, resumes one state-correct frame 
     expect(api.requests.length).toBe(requests);
     await page.getByRole("button", { name: "Map", exact: true }).click();
     await expect.poll(() => cv.evaluate((c: any) => c.__frames)).toBeGreaterThan(frames);
+    await expect.poll(() => motion(page)).toBe("still");
+});
+test("SYNTHETIC ambient Atlas motion pauses for the hidden list pane and hidden tab, then resumes", async ({ page, api }) => {
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await fixture(page, api);
+    await page.goto(atlasPath);
+    const cv = page.locator(".atlas-map > canvas");
+    await expect.poll(() => motion(page)).toBe("ambient");
+    await expect.poll(() => frames(cv)).toBeGreaterThan(2);
+    const requests = api.requests.length;
+    await showList(page);
+    await expect.poll(() => motion(page)).toBe("paused");
+    let paused = await frames(cv);
+    await page.waitForTimeout(400);
+    expect(await frames(cv)).toBe(paused);
+    await page.getByRole("button", { name: "Map", exact: true }).click();
+    await expect.poll(() => motion(page)).toBe("ambient");
+    await expect.poll(() => frames(cv)).toBeGreaterThan(paused + 2);
+    // SYNTHETIC tab-hidden signal: Playwright cannot background a tab, so fake document.hidden.
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => true }); document.dispatchEvent(new Event("visibilitychange")); });
+    await expect.poll(() => motion(page)).toBe("paused");
+    paused = await frames(cv);
+    await page.waitForTimeout(400);
+    expect(await frames(cv)).toBe(paused);
+    await page.evaluate(() => { Object.defineProperty(document, "hidden", { configurable: true, get: () => false }); document.dispatchEvent(new Event("visibilitychange")); });
+    await expect.poll(() => frames(cv)).toBeGreaterThan(paused + 2);
+    expect(api.requests.length).toBe(requests);
 });
 test("SYNTHETIC real two-touch pinch and cancellation never become repository entry or collection", async ({ page, api, context }) => {
     await page.setViewportSize({ width: 390, height: 1000 });
