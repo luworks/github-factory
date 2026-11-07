@@ -13,6 +13,7 @@ import {
   LoaderCircle,
   ShieldCheck,
   Layers3,
+  Play,
 } from "lucide-react";
 import type { FeaturedProject, StyleId } from "../contracts";
 import { STYLES } from "../client/demo";
@@ -184,6 +185,7 @@ export function LandingPage() {
                 </button>
               ))}
             </div>
+            <a className="primary-button" style={{minHeight:44,fontSize:14,marginTop:14,marginRight:10}} href={appPath("/tour")}><Play size={14} /> Take the tour</a>
             <a className="primary-button" style={{minHeight:44,fontSize:14,marginTop:14}} href={appPath("/atlas")}>Explore Atlas <ArrowUpRight size={14} /></a>
             <div className="hero-assurances">
               <span>
