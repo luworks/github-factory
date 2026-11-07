@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import type { FeaturedProject } from "../contracts";
 import { getCachedWorld, getGallery } from "../client/api";
 import { Brand, External } from "../components/shared";
@@ -18,8 +18,8 @@ export function AtlasPage() {
     const [catalog, setCatalog] = useState<FeaturedProject[] | null>(null), [catalogError, setCatalogError] = useState<string | null>(null), [selected, setSelected] = useState<string | null>(null), [statuses, setStatuses] = useState(new Map<string, CacheStatus>()), [imports, setImports] = useState<string[]>([]), [query, setQuery] = useState(""), [page, setPage] = useState(0), [pane, setPane] = useState<"map" | "list">("map"), [chooser, setChooser] = useState<string[]>([]), [locateRequest, setLocateRequest] = useState<{
         key: string;
         revision: number;
-    } | null>(null), [positionSaved, setPositionSaved] = useState(true), [initial, setInitial] = useState<AtlasSession | null>(null), [progressRevision, setProgressRevision] = useState(0), [focusedKey, setFocusedKey] = useState<string | null>(null), [inspectInput, setInspectInput] = useState(""), [inspectError, setInspectError] = useState<string | null>(null);
-    const session = useRef<AtlasSession | null>(null), view = useRef({ centerX: 1400, centerY: 1000, zoomRatio: 1 }), selectedRef = useRef<string | null>(null), origin = useRef<"list" | "canvas">("list"), importRef = useRef<string[]>([]), statusRef = useRef(statuses), list = useRef<HTMLDivElement>(null), pendingRestore = useRef(false), mounted = useRef(true);
+    } | null>(null), [positionSaved, setPositionSaved] = useState(true), [initial, setInitial] = useState<AtlasSession | null>(null), [progressRevision, setProgressRevision] = useState(0), [focusedKey, setFocusedKey] = useState<string | null>(null), [inspectInput, setInspectInput] = useState(""), [inspectError, setInspectError] = useState<string | null>(null), [enterRequest, setEnterRequest] = useState(0);
+    const session = useRef<AtlasSession | null>(null), view = useRef({ centerX: 1400, centerY: 1000, zoomRatio: 1 }), selectedRef = useRef<string | null>(null), origin = useRef<"list" | "canvas">("list"), importRef = useRef<string[]>([]), statusRef = useRef(statuses), list = useRef<HTMLDivElement>(null), pendingRestore = useRef(false), mounted = useRef(true), enterIntent = useRef<string | null>(null), navigate = useNavigate();
     const loader = useMemo(() => selectionLoader((key: string) => { const [owner, repo] = key.split("/"); return getCachedWorld(owner, repo); }), []);
     const updateStatus = useCallback((key: string, value: CacheStatus) => { const next = new Map(statusRef.current); next.set(key, value); statusRef.current = next; setStatuses(next); }, []);
     const save = useCallback((token?: string) => {
@@ -43,10 +43,13 @@ export function AtlasPage() {
     }, [loader, updateStatus]);
     const cancelRead = useCallback(() => {
         loader.cancel();
+        enterIntent.current = null;
         const key = selectedRef.current, state = key ? statusRef.current.get(key) : undefined;
         if (key && state?.state === "loading") updateStatus(key, { state: "unchecked", lastReceived: state.lastReceived });
     }, [loader, updateStatus]);
-    const choose = useCallback((keys: string[], via: "list" | "canvas") => {
+    // A click on a landmark card or map label enters its cached world directly once
+    // its facts verify; "Check cached facts" only inspects (enter = false).
+    const choose = useCallback((keys: string[], via: "list" | "canvas", enter = true) => {
         if (keys.length !== 1) {
             cancelRead();
             setChooser(keys);
@@ -57,6 +60,9 @@ export function AtlasPage() {
         if (previous && previous !== key && prior?.state === "loading")
             updateStatus(previous, { state: "unchecked", lastReceived: prior.lastReceived });
         selectedRef.current = key;
+        enterIntent.current = enter ? key : null;
+        if (enter)
+            setEnterRequest(n => n + 1);
         origin.current = via;
         setSelected(key);
         setChooser([]);
@@ -118,6 +124,14 @@ export function AtlasPage() {
     useEffect(() => { if (chooser.length === 0 && facts && selected === facts.identity.repoKey)
         noteExploration(facts.identity, "discovered"); }, [facts, selected, chooser.length]);
     const selectedLandmark = landmarks.find(x => x.repoKey === selected), filtered = landmarks.filter(x => (x.fullName + " " + x.title + " " + x.category).toLowerCase().includes(query.toLowerCase())), rows = filtered.slice(page * 50, page * 50 + 50), enterToken = useMemo(() => selected ? crypto.randomUUID() : null, [selected]);
+    useEffect(() => {
+        if (!facts || !selected || !enterToken || chooser.length > 0 || enterIntent.current !== selected || facts.identity.repoKey !== selected)
+            return;
+        enterIntent.current = null;
+        const [owner, repo] = facts.fullName.split("/");
+        save(enterToken);
+        void navigate({ to: "/world/$owner/$repo", params: { owner, repo }, search: { mode: "cached", from: "atlas", atlasReturn: enterToken, style: selectedLandmark?.style ?? "moonshot" } });
+    }, [facts, selected, enterToken, chooser.length, selectedLandmark, navigate, save, enterRequest]);
     const completion = selected ? explorationCompletion(selected) : null;
     const flags = selected ? explorationFlags(selected) : { discovered: false, visited: false };
     void progressRevision;
@@ -132,7 +146,7 @@ export function AtlasPage() {
                 setInspectError("The 100-repository survey capacity is full. Existing positions are retained.");
                 return;
             }
-            choose([key], "list");
+            choose([key], "list", false);
         }
         catch {
             setInspectError("Enter a public HTTPS GitHub repository URL. This action only checks existing cached facts.");
@@ -146,7 +160,7 @@ export function AtlasPage() {
     return <main className="atlas-shell">
   <header className="atlas-header"><Brand compact/><h1>Repository Atlas</h1><Link to="/">Mission Control</Link></header>
   <div className="atlas-progress-controls"><span>{progress.durableCountKnown ? `${counts.saved} saved Exploration stars` : "Saved Exploration star count unknown"} · {counts.session} session Exploration stars — not saved</span><button onClick={() => { void reconcileProgress(); }}>Reload local progress</button><button onClick={() => setResetConfirm(true)}>Clear exploration progress</button>{resetConfirm && <div role="alertdialog" aria-label="Clear local exploration progress"><p>Clear only this browser’s exploration flags and stars? Atlas positions, public source caches and server budgets are preserved.</p><button onClick={() => { void clearExploration().then(() => {setResetConfirm(false);setResetError("");}).catch(() => setResetError("Progress could not be cleared. Existing data was retained.")); }}>Confirm clear exploration progress</button><button onClick={() => setResetConfirm(false)}>Keep progress</button></div>}{resetError && <p role="alert">{resetError}</p>}{progress.warning && <p>{progress.warning}</p>}</div>
-  <div className="atlas-intro"><p>Choose a landmark, inspect its captured identity, then enter its world. This atlas shows its catalog and your cached survey entries.</p><p>{catalog === null ? "Loading catalog" : `${landmarks.length} listed landmarks · ${[...statuses.values()].filter(s => s.state === "cached").length} captures checked this visit`} · No full GitHub map or complete history is claimed.</p></div>
+  <div className="atlas-intro"><p>Click a landmark to enter its cached world, or inspect a repository first. This atlas shows its catalog and your cached survey entries.</p><p>{catalog === null ? "Loading catalog" : `${landmarks.length} listed landmarks · ${[...statuses.values()].filter(s => s.state === "cached").length} captures checked this visit`} · No full GitHub map or complete history is claimed.</p></div>
   {catalogError && <p className="atlas-warning" role="alert">{catalogError}</p>}
   {!positionSaved && <p className="atlas-warning" role="status">View position is temporary. Browser session storage is unavailable; a reload may lose it.</p>}
   <div className="atlas-tabs" aria-label="Atlas view"><button aria-pressed={pane === "map"} onClick={() => setPane("map")}>Map</button><button aria-pressed={pane === "list"} onClick={() => setPane("list")}>Repository list</button></div>
@@ -164,7 +178,7 @@ export function AtlasPage() {
    {catalog !== null && !(initial?.selectedRepoKey === selected && selected && (!current || current.state === "loading")) ? <AtlasCanvas lit={lit} landmarks={landmarks} statuses={statuses} selected={selected} initialView={initial ?? undefined} locateRequest={locateRequest} onChoose={choose} onClear={() => { cancelRead(); setChooser([]); selectedRef.current = null; setSelected(null); save(); }} onView={(camera: Camera, homeZoom: number, commit: boolean) => { view.current = { centerX: camera.centerX, centerY: camera.centerY, zoomRatio: camera.zoom / homeZoom }; if (commit)
         save(); }}/> : <div className="atlas-map"><p className="atlas-map-unavailable">Loading the bounded catalog…</p></div>}
    <aside className="atlas-card" aria-label="Selected repository identity"><div className="atlas-card-content">
-    {chooser.length > 0 ? <><h2>Choose a landmark</h2><p>{chooser.length} landmarks share this map target. Selection does not enter a world.</p>{chooser.slice(0, 50).map(key => <button key={key} onClick={() => choose([key], "list")}>{key}</button>)}{chooser.length > 50 && <p>Use repository list search for all members.</p>}</> : selected ? <>
+    {chooser.length > 0 ? <><h2>Choose a landmark</h2><p>{chooser.length} landmarks share this map target. Choose one to enter its world.</p>{chooser.slice(0, 50).map(key => <button key={key} onClick={() => choose([key], "list")}>{key}</button>)}{chooser.length > 50 && <p>Use repository list search for all members.</p>}</> : selected ? <>
      <div className="atlas-card-top"><span>CAPTURE IDENTITY</span><button aria-label="Close selected landmark" onClick={() => { cancelRead(); selectedRef.current = null; setSelected(null); save(); }}>×</button></div>
      <h2>{(facts?.fullName ?? selected).split("/").map((part, i) => <span key={i}>{i === 0 ? part + " /" : part}</span>)}</h2><p className="atlas-status" data-state={current?.state ?? "unchecked"} data-freshness={facts && facts.refreshAfter <= Date.now() ? "stale" : "unknown"}>{statusText(current)}</p><span className="sr-only" role="status">{facts?.fullName ?? selected}: {statusText(current)}</span>
      {!selectedLandmark && !facts && <p>This source is not currently listed in the catalog. Its availability remains unknown until checked.</p>}
@@ -174,7 +188,7 @@ export function AtlasPage() {
 
      </> : <><p>{current?.state === "miss" ? "No cached capture was found. No collection was started." : current?.state === "unavailable" ? "The cached source cannot currently be verified. Storage failure is not proof of a missing or private repository." : "Select a landmark to check existing cached facts."}</p>{lastReceived && <div className="atlas-last"><p>Last received: {lastReceived.fullName} at {lastReceived.identity.collectedAt}; current state unknown.</p><code>{lastReceived.identity.headSha}</code><p>{lastReceived.tree} tree · {lastReceived.nodes} districts / {lastReceived.edges} connections. These prior facts do not authorize entry while the source is unavailable.</p></div>}<External href={`https://github.com/${selected}`}>GitHub repository</External></>}
 
-    </> : <><h2>An observatory for code</h2><p>Select a landmark on the map or in the visible repository list. Unchecked landmarks are outlines, not confirmed captured worlds.</p><p>Arrow keys pan, +/− zoom, 0 returns home and F locates a selection. Pinch or drag on touch screens.</p><p>Exploration starts with source evidence. Selecting or entering a world does not earn an Exploration star.</p></>}
+    </> : <><h2>An observatory for code</h2><p>Click a landmark on the map or in the repository list to enter its world. Unchecked landmarks are outlines, not confirmed captured worlds.</p><p>Arrow keys pan, +/− zoom, 0 returns home and F locates a selection. Pinch or drag on touch screens.</p><p>Exploration starts with source evidence. Selecting or entering a world does not earn an Exploration star.</p></>}
    </div>{selected && chooser.length===0 && <div className="atlas-actions">{facts && enterToken && <Link className="atlas-enter" to="/world/$owner/$repo" params={{ owner: facts.fullName.split("/")[0], repo: facts.fullName.split("/")[1] }} search={{ mode: "cached", from: "atlas", atlasReturn: enterToken, style: selectedLandmark?.style ?? "moonshot" }} preload={false} onClick={() => save(enterToken)}>Enter cached world</Link>}<button className="atlas-retry" disabled={current?.state === "loading"} onClick={() => loadFacts(selected)}>Reload cached facts</button></div>}</aside>
   </div>
   <footer className="atlas-footer">Public cached source · Read only · Original scenery · Local exploration is separate from GitHub stars and contributions</footer>

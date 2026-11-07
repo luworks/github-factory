@@ -60,6 +60,12 @@ export function LandingPage() {
     [gallery, setGallery] = useState<readonly FeaturedProject[]>(CURATED_PROJECTS),
     [style, setStyle] = useState<StyleId>("moonshot");
   const [ready, setReady] = useState(false);
+  const build = (fullName: string) => {
+    setRepo(`https://github.com/${fullName}`);
+    const input = document.getElementById("repository") as HTMLInputElement | null;
+    input?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+    input?.focus({ preventScroll: true });
+  };
   const [galleryLoaded, setGalleryLoaded] = useState(false);
   useEffect(() => setReady(true), []);
   const root = useRef<HTMLDivElement>(null);
@@ -258,7 +264,7 @@ export function LandingPage() {
           </div>
           <div className="project-grid">
             {gallery.map((p, index) => (
-              <ProjectCard key={p.fullName} project={p} enabled={galleryLoaded} index={index} />
+              <ProjectCard key={p.fullName} project={p} enabled={galleryLoaded} index={index} onBuild={build} />
             ))}
           </div>
         </section>

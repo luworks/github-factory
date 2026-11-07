@@ -21,6 +21,8 @@ async function fixture(page: any, api: any) {
 }
 async function showList(page: any) { const button = page.getByRole("button", { name: "Repository list", exact: true }); if (await button.isVisible())
     await button.click(); }
+/** Inspect without entering: the explicit "Check cached facts" path. Card clicks enter directly. */
+async function inspect(page: any, key: string) { await showList(page); const input = page.locator("#atlas-repository"); await input.fill(`https://github.com/${key}`); await input.press("Enter"); }
 function row(page: any, key: string) { return page.locator(".atlas-list-rows").getByRole("button", { name: new RegExp(key) }); }
 test("SYNTHETIC Atlas two-repository cached round trips preserve identity/source/styles/view/focus without stars or POST", async ({ page, api }) => {
     const worlds = await fixture(page, api);
@@ -28,7 +30,8 @@ test("SYNTHETIC Atlas two-repository cached round trips preserve identity/source
     await expect(row(page, keys[0])).toContainText("Cached status not checked");
     expect(api.requests.filter((r: any) => r.path.includes("/api/world/"))).toEqual([]);
     for (const [i, key] of keys.slice(0, 2).entries()) {
-        await row(page, key).click();
+        await inspect(page, key);
+        await expect(page).toHaveURL(/\/atlas/);
         const card = page.locator(".atlas-card");
         await expect(card.getByText("Discovered on this device · No Exploration star awarded.", { exact: true })).toBeVisible();
         await expect(card.getByRole("link", { name: "GitHub source" })).toHaveAttribute("href", worlds[i].repo.url);
@@ -38,9 +41,10 @@ test("SYNTHETIC Atlas two-repository cached round trips preserve identity/source
         await cv.focus();
         await cv.press("=");
         await cv.press("ArrowDown");
-        const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem("moonfactory.atlas.session.v1")!));
-        await card.getByRole("link", { name: "Enter cached world" }).click();
+        await row(page, key).click();
         await expect(page).toHaveURL(new RegExp(`/world/${key}\\?`));
+        // The view saved at entry (after the list click located the landmark) is what Back restores.
+        const before = await page.evaluate(() => JSON.parse(sessionStorage.getItem("moonfactory.atlas.session.v1")!));
         await expect(page.locator(".explorer-visit-status")).toContainText("Visited on this device");
         await expect(page.locator(".explorer-visit-status")).toContainText("No Exploration star");
         await page.locator(".district-list").getByRole("button", { name: /SYNTHETIC 源码/ }).click();
@@ -78,13 +82,16 @@ test("SYNTHETIC actual painted map label selects the same repository as its visi
     await page.emulateMedia({ reducedMotion: "no-preference" });
     await fixture(page, api);
     await page.goto(atlasPath);
-    await row(page, keys[0]).click();
+    await inspect(page, keys[0]);
     await expect(page.getByRole("link", { name: "Enter cached world" })).toBeVisible();
     await page.getByRole("button", { name: "Close selected landmark" }).click();
+    const mapTab = page.getByRole("button", { name: "Map", exact: true }); if (await mapTab.isVisible()) await mapTab.click();
     const cv = page.locator(".atlas-map > canvas");
     await expect.poll(() => cv.evaluate((c: any, key: string) => c.__labels?.some((p: any) => p.text === key), keys[0])).toBe(true);
     const label = await cv.evaluate((c: any, key: string) => c.__labels.find((p: any) => p.text === key), keys[0]), box = (await cv.boundingBox())!;
     await page.mouse.click(box.x + label.x, box.y + label.y);
+    await expect(page).toHaveURL(new RegExp(`/world/${keys[0]}\\?`));
+    await page.getByRole("link", { name: "Back to Atlas", exact: true }).click();
     await expect(row(page, keys[0])).toHaveAttribute("aria-pressed", "true");
     await expect(page.locator(".atlas-card")).toContainText("a".repeat(40));
     await page.waitForTimeout(150);
@@ -105,14 +112,13 @@ for (const width of [320, 390, 768])
         await page.keyboard.press("ArrowDown");
         await expect(row(page, keys[1])).toBeFocused();
         await page.keyboard.press("Enter");
+        await expect(page.locator(".explorer-visit-status")).toContainText("Visited on this device");
+        await page.getByRole("link", { name: "Back to Atlas", exact: true }).click();
+        await expect(row(page, keys[1])).toBeFocused();
         await expect(page.locator(".atlas-card")).toContainText("b".repeat(40));
         await expect(page.locator(".atlas-card").getByRole("link", { name: "GitHub source" })).toHaveAttribute("href", "https://github.com/" + keys[1]);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
         expect(await page.locator(".atlas-card").evaluate(e => e.scrollWidth <= e.clientWidth + 1)).toBe(true);
-        await page.getByRole("link", { name: "Enter cached world" }).click();
-        await expect(page.locator(".explorer-visit-status")).toContainText("Visited on this device");
-        await page.getByRole("link", { name: "Back to Atlas", exact: true }).click();
-        await expect(row(page, keys[1])).toBeFocused();
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
     });
 test("SYNTHETIC hidden Atlas map stops drawing, resumes one state-correct frame and never polls", async ({ page, api }) => {
@@ -149,7 +155,7 @@ test("SYNTHETIC real two-touch pinch and cancellation never become repository en
     await cv.press("0");
     await showList(page);
     await row(page, keys[0]).click();
-    await expect(page.getByRole("link", { name: "Enter cached world" })).toBeVisible();
+    await expect(page).toHaveURL(new RegExp(`/world/${keys[0]}\\?`));
     expect(api.requests.every((r: any) => r.method === "GET")).toBe(true);
 });
 
@@ -159,8 +165,7 @@ test("SYNTHETIC Atlas light/dark chrome computes readable contrast and mobile en
     await page.goto(basePath + "/");
     await expect(page.getByRole("link", { name: "Explore Atlas", exact: true }).filter({ visible: true })).toBeVisible();
     await page.getByRole("link", { name: "Explore Atlas", exact: true }).filter({ visible: true }).click();
-    await showList(page);
-    await row(page, keys[0]).click();
+    await inspect(page, keys[0]);
     await expect(page.getByRole("link", { name: "Enter cached world" })).toBeVisible();
     const audit = await page.evaluate(() => {
         const rgb = (value: string) => { const a = value.match(/[\d.]+/g)?.map(Number) ?? []; return [a[0] ?? 0, a[1] ?? 0, a[2] ?? 0, a[3] ?? 1]; };

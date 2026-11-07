@@ -12,7 +12,7 @@ const reduced = () => typeof window !== "undefined" && window.matchMedia("(prefe
  * world page. Pointer handling writes CSS custom properties once per animation frame
  * (no layout reads inside the frame) and shares the offset with the card canvas.
  */
-export function ProjectCard({ project: p, enabled, index }: { project: FeaturedProject; enabled: boolean; index: number }) {
+export function ProjectCard({ project: p, enabled, index, onBuild }: { project: FeaturedProject; enabled: boolean; index: number; onBuild?: (fullName: string) => void }) {
   const shell = useRef<HTMLDivElement>(null);
   const tilt = useRef<PreviewTilt>({ x: 0, y: 0 });
   const frame = useRef(0);
@@ -54,7 +54,8 @@ export function ProjectCard({ project: p, enabled, index }: { project: FeaturedP
     schedule();
   };
   const onClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
-    if (!p.ready) { e.preventDefault(); return; }
+    // No cached map: hand the repository to the explicit "Generate world" form. No request is made.
+    if (!p.ready) { e.preventDefault(); onBuild?.(p.fullName); return; }
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || reduced() || !href) return;
     // Brief zoom-into-the-map transition, then navigate to the same URL.
     e.preventDefault();
@@ -64,7 +65,7 @@ export function ProjectCard({ project: p, enabled, index }: { project: FeaturedP
 
   return (
     <div ref={shell} className="project-card-shell reveal" style={{ "--reveal-delay": `${Math.min(index, 8) * 70}ms` } as React.CSSProperties} onPointerEnter={onEnter} onPointerMove={onMove} onPointerLeave={onLeave}>
-      <a className="project-card" href={href} aria-disabled={!p.ready} tabIndex={p.ready ? undefined : -1} onClick={onClick}>
+      <a className="project-card" href={href} data-ready={p.ready} role={p.ready ? undefined : "button"} tabIndex={p.ready ? undefined : 0} onClick={onClick} onKeyDown={p.ready ? undefined : e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onBuild?.(p.fullName); } }}>
         <div className="project-art">
           <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} enabled={enabled} tilt={tilt.current} />
           <span className="project-category">{p.category}</span>
@@ -89,7 +90,7 @@ export function ProjectCard({ project: p, enabled, index }: { project: FeaturedP
               </span>
             )}
             <span className="project-ready">
-              {p.ready ? "Explore world" : "Map unavailable"}
+              {p.ready ? "Explore world" : "Build this world"}
               <ArrowRight size={12} />
             </span>
           </div>
