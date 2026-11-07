@@ -2,16 +2,15 @@ import { appPath } from "../base-path";
 import { createRootRoute, HeadContent, Scripts, Link } from "@tanstack/react-router";
 import type { ReactNode } from "react";
 import appCss from "../styles.css?url";
+import { homeMeta } from "../og/meta";
+import { publicOrigin } from "../og/origin";
 export const Route = createRootRoute({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Moon Factory — Your codebase, a living world" },
-      {
-        name: "description",
-        content: "Turn a public GitHub repository into a living, explorable world. Five perspectives. One source of truth.",
-      },
+      // Default share card; routes override by name/property.
+      ...homeMeta(publicOrigin()),
     ],
     links: [
       { rel: "stylesheet", href: appCss },
