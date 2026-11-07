@@ -1,5 +1,5 @@
 import type { StyleId, WorldEdge } from "../contracts";
-import { declutterLabels, type PlacedNode } from "./layout";
+import { declutterLabels, type LabelRect, type PlacedNode } from "./layout";
 import { drawArchitecture } from "./art";
 import { ellipse, line, type Pen } from "./primitives";
 import { terrain } from "./terrain";
@@ -164,23 +164,24 @@ export function paintBuilding(g: Pen, pn: PlacedNode, style: StyleId, selected: 
   ellipse(g, -51, 17, 3, 2.5, STATUS[pn.node.status]);
   g.restore();
 }
-/** Labels are painted last in screen space, so roofs and vignette never obscure them. */
-function labelMetrics(g: Pen, pn: PlacedNode, selected: boolean, _scale: number) {
-  const maxWidth = selected ? 260 : 180;
-  g.font = `${selected ? 600 : 500} 13px "IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace`;
+/** Labels are painted last in screen space, so roofs and vignette never obscure them.
+ * Compact plates (narrow canvases) use a smaller font and a shorter plate. */
+function labelMetrics(g: Pen, pn: PlacedNode, selected: boolean, compact: boolean) {
+  const maxWidth = selected ? (compact ? 200 : 260) : compact ? 128 : 180;
+  g.font = `${selected ? 600 : 500} ${compact ? 11 : 13}px "IBM Plex Mono",ui-monospace,SFMono-Regular,Consolas,monospace`;
   let label = pn.node.label;
   if (g.measureText(label).width > maxWidth) {
     while (label.length > 1 && g.measureText(label + "…").width > maxWidth) label = label.slice(0, -1);
     label += "…";
   }
-  return { label, width: g.measureText(label).width + 16 };
+  return { label, width: g.measureText(label).width + (compact ? 12 : 16), height: compact ? 22 : 28 };
 }
-export function paintLabel(g: Pen, pn: PlacedNode, style: StyleId, selected: boolean, x: number, y: number, scale: number) {
+export function paintLabel(g: Pen, pn: PlacedNode, style: StyleId, selected: boolean, x: number, y: number, compact = false) {
   g.save();
-  const { label, width } = labelMetrics(g, pn, selected, scale);
+  const { label, width, height } = labelMetrics(g, pn, selected, compact);
   g.fillStyle = selected ? MAP_CONTRAST.labelSelectedPlate : MAP_CONTRAST.labelPlate;
   g.beginPath();
-  g.roundRect(x - width / 2, y, width, 28, 3);
+  g.roundRect(x - width / 2, y, width, height, 3);
   g.fill();
   g.strokeStyle = selected ? MAP_CONTRAST.labelSelectedBorder : MAP_CONTRAST.border;
   g.lineWidth = selected ? 2 : 1;
@@ -188,9 +189,11 @@ export function paintLabel(g: Pen, pn: PlacedNode, style: StyleId, selected: boo
   g.fillStyle = selected ? MAP_CONTRAST.labelSelectedText : MAP_CONTRAST.labelText;
   g.textAlign = "center";
   g.textBaseline = "middle";
-  g.fillText(label, x, y + 14);
+  g.fillText(label, x, y + height / 2);
   g.restore();
 }
+/** Narrow canvases switch to compact plates and a tighter label budget. */
+const COMPACT_WIDTH = 640;
 export function paintLabels(
   g: Pen,
   nodes: PlacedNode[],
@@ -202,12 +205,18 @@ export function paintLabels(
     y: number;
     k: number;
   },
+  view?: { width: number; height: number; blocked?: LabelRect[] },
 ) {
   const { x, y, k } = camera;
-  const labels = nodes.map((p) => {
-    const { width } = labelMetrics(g, p, p.node.id === selectedId, k);
-    return { id: p.node.id, x: p.x * k + x - width / 2, y: (p.y + 34) * k + y, width, height: 28 };
+  const compact = !!view && view.width < COMPACT_WIDTH;
+  const metrics = new Map(nodes.map((p) => [p.node.id, labelMetrics(g, p, p.node.id === selectedId, compact)]));
+  // Larger districts claim label space first; ties keep the source order.
+  const labels = nodes.toSorted((a, b) => b.node.size - a.node.size).map((p) => {
+    const { width, height } = metrics.get(p.node.id)!;
+    return { id: p.node.id, x: p.x * k + x - width / 2, y: (p.y + 34) * k + y, width, height };
   });
-  const visible = new Set(declutterLabels(labels, [selectedId, hoverId]).map((r) => r.id));
-  for (const p of nodes) if (visible.has(p.node.id)) paintLabel(g, p, style, p.node.id === selectedId, p.x * k + x, (p.y + 34) * k + y, k);
+  const visible = new Set(declutterLabels(labels, [selectedId, hoverId], view && {
+    ...view, coverage: compact ? 0.09 : 0.14, gap: compact ? 8 : 6,
+  }).map((r) => r.id));
+  for (const p of nodes) if (visible.has(p.node.id)) paintLabel(g, p, style, p.node.id === selectedId, p.x * k + x, (p.y + 34) * k + y, compact);
 }

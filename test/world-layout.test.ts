@@ -57,3 +57,19 @@ test("narrow-screen labels preserve selected identity without overlapping other 
   expect(declutterLabels(crowded, ["b", null]).map((r) => r.id)).toEqual(["b", "c"]);
   expect(declutterLabels(crowded, [null, null]).map((r) => r.id)).toEqual(["a", "c"]);
 });
+test("viewport-aware label culling drops offscreen, occluded and over-budget labels but never the selected one", () => {
+  const view = { width: 390, height: 600, blocked: [{ id: "zoom", x: 330, y: 400, width: 48, height: 140 }], coverage: 0.03, gap: 8 };
+  const labels = [
+    { id: "offscreen", x: 370, y: 100, width: 90, height: 22 },
+    { id: "occluded", x: 300, y: 450, width: 60, height: 22 },
+    { id: "first", x: 40, y: 100, width: 90, height: 22 },
+    { id: "second", x: 40, y: 200, width: 90, height: 22 },
+    { id: "close", x: 40, y: 126, width: 90, height: 22 },
+    { id: "budget", x: 40, y: 300, width: 90, height: 22 },
+    { id: "selected", x: 360, y: 420, width: 120, height: 22 },
+  ];
+  // 390*600*0.03 = 7020 px² budget: selected (2640) + two 90x22 labels (1980 each); a third would exceed it.
+  expect(declutterLabels(labels, ["selected", null], view).map((r) => r.id)).toEqual(["selected", "first", "second"]);
+  // Without a view the legacy behaviour (overlap-only) is unchanged.
+  expect(declutterLabels(labels, [null, null]).map((r) => r.id)).toContain("offscreen");
+});

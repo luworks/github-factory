@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { Minus, Plus, Maximize2 } from "lucide-react";
 import type { StyleId, WorldEdge, WorldSnapshot } from "../contracts";
-import { layoutWorld, mapBounds, pickNode, type PlacedNode } from "./layout";
+import { layoutWorld, mapBounds, pickNode, type LabelRect, type PlacedNode } from "./layout";
 import { paintTerrain, paintConnections, paintBuilding, paintLabels, PALETTES } from "./paint";
 import { setSunlight, setWind } from "./primitives";
 import { sceneryAnchors, type SceneryAnchors } from "./terrain";
@@ -118,6 +118,18 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     let drift = 0, cost = 0, slow = false, frames = 0;
     const retro = document.createElement("canvas"), retroContext = retro.getContext("2d")!;
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    // HTML chrome over the canvas (marked data-canvas-occluder, plus our own
+    // controls). Measured on resize only, never inside a frame.
+    let blocked: LabelRect[] = [];
+    const occluders = () => [
+      ...(el.parentElement?.querySelectorAll<HTMLElement>(":scope > [data-canvas-occluder]") ?? []),
+      ...el.querySelectorAll<HTMLElement>(".camera-controls, .map-hint, .map-coordinates"),
+    ];
+    const measureOccluders = () => {
+      const r = el.getBoundingClientRect();
+      blocked = occluders().map((o) => o.getBoundingClientRect()).filter((b) => b.width > 0 && b.height > 0)
+        .map((b) => ({ id: "", x: b.left - r.left, y: b.top - r.top, width: b.width, height: b.height }));
+    };
     const animated = () => !motion.matches && !data.current.paused;
     let previousMode = animated();
     moving.current = previousMode;
@@ -142,6 +154,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     const resize = () => {
       const r = el.getBoundingClientRect(), old = size.current;
       if (r.width < 1 || r.height < 1) { stop(); return; }
+      measureOccluders();
       if (sized && r.width === old.w && r.height === old.h) return;
       const dpr = Math.min(2, window.devicePixelRatio || 1);
       size.current = { w: r.width, h: r.height };
@@ -269,7 +282,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       vignette.addColorStop(1, s === "civilization" ? "#514b3026" : "#07101666");
       g.fillStyle = vignette;
       g.fillRect(0, 0, width, height);
-      paintLabels(g, placed.current, s, sel, hover.current, c);
+      paintLabels(g, placed.current, s, sel, hover.current, c, { width, height, blocked });
       const identity = JSON.stringify([w.repo.fullName, w.headSha, w.collectedAt, w.source]);
       if (identity !== renderedIdentity.current) { renderedIdentity.current = identity; data.current.onRendered?.(); }
       // Adaptive quality: hold 60fps when the frame is cheap, fall back to 30fps when it is not.
@@ -280,6 +293,8 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
       request();
     };
     const observer = new ResizeObserver(resize); observer.observe(el); resize();
+    const chrome = new ResizeObserver(() => { measureOccluders(); dirty = true; request(); });
+    for (const o of occluders()) chrome.observe(o);
     const intersection = new IntersectionObserver(entries => { visible = entries[0]?.isIntersecting ?? false; if (visible) { dirty = true; request(); } else stop(); });
     intersection.observe(el);
     const visibility = () => { if (document.hidden) stop(); else { dirty = true; request(); } };
@@ -298,7 +313,7 @@ export function WorldCanvas({ world, style, selectedId, onSelect, className = ""
     cv.addEventListener("wheel", wheel, { passive: false });
     return () => {
       stopped = true; stop();
-      observer.disconnect(); intersection.disconnect();
+      observer.disconnect(); intersection.disconnect(); chrome.disconnect();
       document.removeEventListener("visibilitychange", visibility); motion.removeEventListener("change", media);
       invalidate.current = () => {}; reconcileMotion.current = () => {};
       cv.removeEventListener("wheel", wheel);
