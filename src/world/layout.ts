@@ -92,24 +92,43 @@ export interface LabelRect {
   width: number;
   height: number;
 }
-/** Keep the selected/hovered label first; zooming progressively reveals the rest. */
-export function declutterLabels(labels: LabelRect[], priority: (string | null)[]): LabelRect[] {
+/** Where labels may go: the visible canvas minus HTML chrome drawn over it. */
+export interface LabelView {
+  width: number;
+  height: number;
+  /** Screen rectangles covered by overlays (heading, controls, style switcher). */
+  blocked?: LabelRect[];
+  /** Share of the canvas area that label plates may cover (priority culling). */
+  coverage?: number;
+  /** Minimum clear space between plates. */
+  gap?: number;
+}
+const overlaps = (a: LabelRect, b: LabelRect, gap: number) =>
+  a.x < b.x + b.width + gap && a.x + a.width + gap > b.x && a.y < b.y + b.height + gap && a.y + a.height + gap > b.y;
+/** Keep the selected/hovered label first; zooming progressively reveals the rest.
+ * With a view, labels must also sit fully on screen, avoid overlays and fit an
+ * area budget, so small screens show fewer, more important names. Priority
+ * labels (selected/hovered) are never culled by the budget or overlays. */
+export function declutterLabels(labels: LabelRect[], priority: (string | null)[], view?: LabelView): LabelRect[] {
   const rank = (id: string) => {
     const i = priority.indexOf(id);
     return i < 0 ? priority.length : i;
   };
+  const gap = view?.gap ?? 4;
+  const budget = view ? view.width * view.height * (view.coverage ?? 1) : Infinity;
+  let used = 0;
   const accepted: LabelRect[] = [];
   for (const label of labels.toSorted((a, b) => rank(a.id) - rank(b.id))) {
-    if (
-      !accepted.some(
-        (r) =>
-          label.x < r.x + r.width + 4 &&
-          label.x + label.width + 4 > r.x &&
-          label.y < r.y + r.height + 4 &&
-          label.y + label.height + 4 > r.y,
-      )
-    )
-      accepted.push(label);
+    const important = rank(label.id) < priority.length;
+    if (view && !important) {
+      const margin = 4;
+      if (label.x < margin || label.y < margin || label.x + label.width > view.width - margin || label.y + label.height > view.height - margin) continue;
+      if (view.blocked?.some((r) => overlaps(label, r, 2))) continue;
+      if (used + label.width * label.height > budget) continue;
+    }
+    if (accepted.some((r) => overlaps(label, r, gap))) continue;
+    accepted.push(label);
+    used += label.width * label.height;
   }
   return accepted;
 }

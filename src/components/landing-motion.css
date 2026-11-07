@@ -120,12 +120,11 @@
 .project-card-shell.is-warping .repository-preview-canvas { transform: scale(1.6); transition: transform .34s cubic-bezier(.5, 0, .9, .4); }
 @keyframes card-warp { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: scale(1.5); } }
 
-/* Map stays fully visible; caption sits below it rather than over half of it. */
+/* The map is the hero; capture provenance lives in a compact disclosure chip over it. */
 .landing .project-art { height: auto; min-height: 0; }
 .landing .project-art:has(.repository-preview) .repository-preview { position: relative; inset: auto; display: flex; flex-direction: column; }
-.repository-preview-stage { position: relative; height: 196px; overflow: hidden; }
+.repository-preview-stage { position: relative; height: var(--card-art-h, 232px); overflow: hidden; }
 .repository-preview-stage .repository-preview-canvas { transition: transform .5s ease; }
-.landing .project-art:has(.repository-preview) .repository-preview-caption { position: relative; inset: auto; border-top: 1px solid var(--geist-map-border); }
 .landing .project-art:not(:has(.repository-preview)) { height: 220px; min-height: 220px; }
 .preview-loader { display: inline-flex; gap: 5px; }
 .preview-loader i { width: 7px; height: 7px; border-radius: 1px; background: currentColor; animation: preview-load 1s ease-in-out infinite; }

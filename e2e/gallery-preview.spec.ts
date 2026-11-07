@@ -50,11 +50,28 @@ test("SYNTHETIC cache world shares the real renderer, preserves source stamp, pa
   await page.goto(`${basePath}/`);
   const card = page.locator(".project-card").filter({ has: page.getByRole("heading", { name: "SYNTHETIC Atlas", exact: true }) });
   await card.scrollIntoViewIfNeeded();
-  await expect(card).toContainText("Stale cache");
-  await expect(card).toContainText("1234567");
-  await expect(card).toContainText("2 observed / 1 inferred");
+  // Calm summary on the art; the full capture record sits one keyboard press away.
+  const shell = page.locator(".project-card-shell").filter({ has: card });
+  const chip = shell.locator(".card-provenance .provenance-trigger");
+  await expect(chip).toContainText("Stale snapshot");
+  await expect(chip).toContainText("districts");
+  await expect(chip).toHaveAttribute("aria-expanded", "false");
+  const record = shell.getByRole("group", { name: "Capture details for synthetic-moonshot/browser-fixture", includeHidden: true });
+  await expect(record).toBeHidden();
+  await expect(record).toContainText("Stale cache");
+  await chip.focus();
+  await page.keyboard.press("Enter");
+  await expect(chip).toHaveAttribute("aria-expanded", "true");
+  await expect(record).toBeVisible();
+  await expect(record).toContainText("Stale cache · current state unknown");
+  await expect(record).toContainText("1234567");
+  await expect(record).toContainText("2 observed / 1 inferred");
+  await expect(record).toContainText("2026-11-04 16:00 UTC");
+  await expect(record).toContainText("Motion illustrates links · not live activity");
+  await page.keyboard.press("Escape");
+  await expect(record).toBeHidden();
+  await expect(chip).toBeFocused();
   await expect(page.getByRole("link", { name: "GitHub source: synthetic-moonshot/browser-fixture", exact: true })).toHaveAttribute("href", "https://github.com/synthetic-moonshot/browser-fixture");
-  await expect(card).toContainText("2026-11-04 16:00 UTC");
   const canvas = card.getByTestId("repository-preview-canvas");
   await expect(canvas).toBeVisible();
   await card.screenshot({ path: "artifacts/gallery-preview-synthetic.png" });
@@ -96,7 +113,9 @@ test("SYNTHETIC all five visible cached styles animate without interaction and f
   await page.locator(".worlds-section").scrollIntoViewIfNeeded();
   const canvases = page.getByTestId("repository-preview-canvas");
   await expect(canvases).toHaveCount(5);
-  await expect(page.getByText("Motion illustrates links · not live activity", { exact: true })).toHaveCount(5);
+  // Every card keeps the "not live activity" note in its provenance record (disclosed on demand).
+  await expect(page.locator(".card-provenance .provenance-panel").getByText("Motion illustrates links · not live activity", { exact: true })).toHaveCount(5);
+  await expect(page.locator(".card-provenance .provenance-trigger")).toHaveCount(5);
   const signatures = () => canvases.evaluateAll((elements) => elements.map((element) => {
     const canvas = element as HTMLCanvasElement;
     const pixels = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height).data;

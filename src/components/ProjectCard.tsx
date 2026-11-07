@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowRight, ArrowUpRight, Github, Star } from "lucide-react";
 import { appPath } from "../base-path";
 import type { FeaturedProject } from "../contracts";
 import { shortNumber } from "../client/api";
-import { RepositoryPreview, type PreviewTilt } from "./RepositoryPreview";
+import { PreviewProvenanceChip, RepositoryPreview, type PreviewProvenance, type PreviewTilt } from "./RepositoryPreview";
 
 const reduced = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -17,6 +17,7 @@ export function ProjectCard({ project: p, enabled, index, onBuild }: { project: 
   const tilt = useRef<PreviewTilt>({ x: 0, y: 0 });
   const frame = useRef(0);
   const target = useRef({ x: 0, y: 0, rect: null as DOMRect | null });
+  const [provenance, setProvenance] = useState<PreviewProvenance | null>(null);
   const href = p.ready ? appPath(`/world/${p.fullName}?style=${p.suggestedStyle}`) : undefined;
 
   useEffect(() => {
@@ -67,7 +68,7 @@ export function ProjectCard({ project: p, enabled, index, onBuild }: { project: 
     <div ref={shell} className="project-card-shell reveal" style={{ "--reveal-delay": `${Math.min(index, 8) * 70}ms` } as React.CSSProperties} onPointerEnter={onEnter} onPointerMove={onMove} onPointerLeave={onLeave}>
       <a className="project-card" href={href} data-ready={p.ready} role={p.ready ? undefined : "button"} tabIndex={p.ready ? undefined : 0} onClick={onClick} onKeyDown={p.ready ? undefined : e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onBuild?.(p.fullName); } }}>
         <div className="project-art">
-          <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} enabled={enabled} tilt={tilt.current} />
+          <RepositoryPreview fullName={p.fullName} style={p.suggestedStyle} enabled={enabled} tilt={tilt.current} onProvenance={setProvenance} />
           <span className="project-category">{p.category}</span>
           <span className="project-arrow">
             <ArrowUpRight size={18} />
@@ -99,6 +100,8 @@ export function ProjectCard({ project: p, enabled, index, onBuild }: { project: 
       <a className="project-source-link" href={`https://github.com/${p.fullName}`} target="_blank" rel="noopener noreferrer" aria-label={`GitHub source: ${p.fullName}`}>
         <Github size={11} /> {"Source"}
       </a>
+      {/* Outside the card link so the disclosure is its own control, never a navigation. */}
+      {provenance && <PreviewProvenanceChip info={provenance} />}
       <span className="project-warp" aria-hidden="true" />
     </div>
   );
