@@ -5,6 +5,7 @@ import { animatePreview } from "../gallery/animation";
 import { loadRepositoryPreview } from "../gallery/preview-loader";
 import { layoutWorld, mapBounds, type PlacedNode } from "../world/layout";
 import { PALETTES, paintTerrain, paintConnections, paintBuilding } from "../world/paint";
+import { ProvenanceDisclosure, Fact, confidenceCounts, shortDay, statusCounts, utcStamp } from "./Provenance";
 import "./repository-preview.css";
 
 /** Move decorative survey signals along the actual source graph. The signal
@@ -172,7 +173,7 @@ function MiniWorldCanvas({ data, style, tilt }: { data: RepositoryPreviewData; s
   return <canvas ref={canvas} className="repository-preview-canvas" data-testid="repository-preview-canvas" aria-hidden="true" />;
 }
 
-export function RepositoryPreview({ fullName, style, enabled = true, tilt }: { fullName: string; style: StyleId; enabled?: boolean; tilt?: PreviewTilt }) {
+export function RepositoryPreview({ fullName, style, enabled = true, tilt, onProvenance }: { fullName: string; style: StyleId; enabled?: boolean; tilt?: PreviewTilt; onProvenance?: (info: PreviewProvenance | null) => void }) {
   const box = useRef<HTMLDivElement>(null);
   const [near, setNear] = useState(false);
   const [visible, setVisible] = useState(false);
@@ -211,18 +212,46 @@ export function RepositoryPreview({ fullName, style, enabled = true, tilt }: { f
     : state === "cached" ? ("Cached snapshot")
     : state === "unavailable" ? ("Structure unavailable")
     : ("Unknown · no cached map");
+  const report = useRef(onProvenance);
+  report.current = onProvenance;
+  useEffect(() => { report.current?.(mapped && state ? { data: data!, state, label } : null); }, [mapped, data, state, label]);
   return (
     <div ref={box} className={`repository-preview preview-${style}`} data-preview-state={failed ? "unavailable" : state || "loading"}>
       <div className="repository-preview-stage">
         {mapped && visible && <MiniWorldCanvas data={data!} style={style} tilt={tilt} />}
         {!mapped && <div className="repository-preview-empty">{!data && near && !failed && <span className="preview-loader" aria-hidden="true"><i /><i /><i /></span>}<span>{label}</span><small>{"No automatic collection or model calls"}</small></div>}
       </div>
-      {mapped && <div className="repository-preview-caption">
-        <span>{label} · {data!.tree === "truncated" ? ("partial tree") : data!.github !== "ok" ? ("partial upstream evidence") : ("GitHub facts")}</span>
-        <span>{data!.nodes.length}/{data!.totalNodes} {"districts"} · {data!.edges.length}/{data!.totalEdges} {"links"} · {`${data!.nodes.filter((n) => n.confidence === "observed").length} observed / ${data!.nodes.filter((n) => n.confidence === "inferred").length} inferred`}</span>
-        <span>{data!.headSha?.slice(0, 7) || ("head unknown")} · {data!.collectedAt ? <time dateTime={data!.collectedAt}>{new Date(data!.collectedAt).toISOString().replace("T", " ").slice(0, 16)} UTC</time> : ("capture time unknown")}</span>
-        <span className="repository-preview-motion-note">{"Motion illustrates links · not live activity"}</span>
-      </div>}
     </div>
+  );
+}
+
+/** What a mapped card preview knows about its own capture. */
+export interface PreviewProvenance { data: RepositoryPreviewData; state: RepositoryPreviewData["state"]; label: string }
+
+/** Compact "Stale snapshot · Nov 4 · 30 districts" chip that discloses the full capture record. */
+export function PreviewProvenanceChip({ info }: { info: PreviewProvenance }) {
+  const { data, state, label } = info;
+  const day = shortDay(data.collectedAt);
+  const prefix = state === "stale" ? "Stale snapshot" : state === "cached" ? "Snapshot" : "Unknown snapshot";
+  const tone = state === "stale" ? "stale" : state === "cached" ? "fresh" : "unknown";
+  return (
+    <ProvenanceDisclosure
+      className="card-provenance"
+      direction="up"
+      tone={tone}
+      title={`Capture details for ${data.fullName}`}
+      summary={<>{prefix}{day ? ` · ${day}` : ""}<span className="sep">·</span>{data.totalNodes} {data.totalNodes === 1 ? "district" : "districts"}</>}
+    >
+      <p className="provenance-status">{label}</p>
+      <dl>
+        <Fact term="Evidence">{data.tree === "truncated" ? "partial tree" : data.github !== "ok" ? "partial upstream evidence" : "GitHub facts"}</Fact>
+        <Fact term="Districts">{data.nodes.length}/{data.totalNodes} {"districts"} · {data.edges.length}/{data.totalEdges} {"links"}</Fact>
+        <Fact term="Confidence">{confidenceCounts(data.nodes)}</Fact>
+        <Fact term="Status">{statusCounts(data.nodes)}</Fact>
+        <Fact term="Head">{data.headSha?.slice(0, 7) || "head unknown"}</Fact>
+        <Fact term="Captured">{data.collectedAt ? <time dateTime={data.collectedAt}>{utcStamp(data.collectedAt)}</time> : "capture time unknown"}</Fact>
+      </dl>
+      <p className="provenance-note repository-preview-motion-note">{"Motion illustrates links · not live activity"}</p>
+    </ProvenanceDisclosure>
   );
 }
