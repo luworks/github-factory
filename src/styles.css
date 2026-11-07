@@ -533,10 +533,10 @@ svg {
   transform: translateY(-4px);
   box-shadow: 0 12px 28px #26301d12;
 }
-.project-card[aria-disabled="true"] {
-  cursor: default;
+.project-card[data-ready="false"] {
+  cursor: pointer;
 }
-.project-card[aria-disabled="true"] .project-arrow {
+.project-card[data-ready="false"] .project-arrow {
   opacity: 1;
   color: var(--geist-disabled-fg);
   background: var(--geist-disabled-bg);

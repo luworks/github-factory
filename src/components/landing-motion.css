@@ -106,7 +106,7 @@
   will-change: transform;
 }
 .landing .project-card-shell.is-tilting > .project-card { transition: transform .08s linear, box-shadow .3s, border-color .3s; }
-.landing .project-card-shell:hover > .project-card[aria-disabled="false"] { box-shadow: 0 24px 40px -18px #1b2a1a55; border-color: var(--geist-secondary); }
+.landing .project-card-shell:hover > .project-card[data-ready="true"] { box-shadow: 0 24px 40px -18px #1b2a1a55; border-color: var(--geist-secondary); }
 .landing .project-card:hover { transform: rotateX(var(--tilt-x)) rotateY(var(--tilt-y)); }
 .project-glint { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; transition: opacity .3s; background: radial-gradient(circle at var(--glint-x) var(--glint-y), #ffffff40, transparent 45%); mix-blend-mode: screen; }
 .project-card-shell:hover .project-glint { opacity: 1; }

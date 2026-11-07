@@ -5,13 +5,19 @@ import type { StyleId } from "../src/contracts";
 
 const previewApi = "/api/gallery-preview/synthetic-moonshot/browser-fixture";
 test.beforeEach(async ({ page }) => { await page.setViewportSize({ width: 1440, height: 600 }); });
-test("SYNTHETIC unknown gallery worlds cannot navigate to an empty route", async ({ page, api }) => {
+test("SYNTHETIC unknown gallery worlds hand the repository to the explicit generate form without navigating", async ({ page, api }) => {
   api.respond("GET", "/api/gallery", () => ({ body: { projects: syntheticGallery.map((p) => ({ ...p, ready: false, collectedAt: null })) } }));
   await page.goto(`${basePath}/`);
   const card = page.locator(".project-card").filter({ has: page.getByRole("heading", { name: "SYNTHETIC Atlas", exact: true }) });
-  await expect(card).toHaveAttribute("aria-disabled", "true");
+  await expect(card).toHaveAttribute("data-ready", "false");
   expect(await card.getAttribute("href")).toBeNull();
-  await expect(card).toContainText("Map unavailable");
+  await expect(card).toContainText("Build this world");
+  const before = page.url();
+  await card.click();
+  expect(page.url()).toBe(before);
+  const fullName = syntheticGallery.find((p) => p.name === "SYNTHETIC Atlas")!.fullName;
+  await expect(page.locator("#repository")).toHaveValue(`https://github.com/${fullName}`);
+  await expect(page.locator("#repository")).toBeFocused();
   await page.locator(".site-footer").scrollIntoViewIfNeeded();
   await expect(page.getByText("Powered by Meta Muse Spark 1.3", { exact: true })).toBeVisible();
   expect(api.requests.filter((r) => r.method === "POST")).toEqual([]);

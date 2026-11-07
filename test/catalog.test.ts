@@ -39,7 +39,7 @@ test("initial English landing disables uncached world links without fabricated s
   const html = renderToStaticMarkup(createElement(LandingPage));
   const cards = [...html.matchAll(/<a class="project-card" href="([^"]+)"/g)].map((match) => match[1]);
   expect(cards).toEqual([]);
-  expect([...html.matchAll(/aria-disabled="true"/g)]).toHaveLength(19);
+  expect([...html.matchAll(/data-ready="false"/g)]).toHaveLength(19);
   expect(html).toContain("Powered by Meta Muse Spark 1.3");
   expect(html).toContain("19 CURATED POPULAR PROJECTS");
   expect(html).not.toContain("World ready");
